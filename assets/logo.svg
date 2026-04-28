@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 290" role="img" aria-label="Occident Acompaña">
+  <style>
+    .o { font-family: Georgia, 'Times New Roman', serif; fill: #E40520; }
+    .heavy { font-weight: 900; }
+    .reg { font-weight: 400; }
+  </style>
+  <text x="0" y="115" class="o heavy" font-size="130" letter-spacing="-3">Occident</text>
+  <text x="0" y="255" class="o reg" font-size="130" letter-spacing="-3">Acompaña</text>
+</svg>

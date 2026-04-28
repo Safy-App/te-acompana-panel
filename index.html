@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Te acompaña · Panel de Control</title>
+<link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --red: #E40520;
+    --red-dark: #B40418;
+    --red-soft: #FCE6E9;
+    --ink: #0F172A;
+    --muted: #64748B;
+    --line: #E2E8F0;
+    --bg: #F8FAFC;
+    --white: #FFFFFF;
+    --green: #15803D;
+    --green-bg: #F0FDF4;
+    --gray: #94A3B8;
+    --gray-bg: #F1F5F9;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    font-size: 14px;
+  }
+
+  /* Header */
+  header.top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    background: var(--white);
+    border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+  header.top .logo { height: 56px; display: block; }
+  header.top .actions { display: flex; gap: 8px; align-items: center; }
+
+  button {
+    font-family: inherit;
+    font-size: 14px;
+    border: 1px solid var(--line);
+    background: var(--white);
+    color: var(--ink);
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all .15s;
+  }
+  button:hover { background: var(--gray-bg); }
+  button.primary {
+    background: var(--red);
+    color: var(--white);
+    border-color: var(--red);
+  }
+  button.primary:hover { background: var(--red-dark); border-color: var(--red-dark); }
+  button.ghost { border-color: transparent; }
+
+  /* Stats */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 12px;
+    padding: 16px 24px 0;
+  }
+  .stat {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .stat .label {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    font-weight: 600;
+  }
+  .stat .value {
+    font-size: 22px;
+    font-weight: 700;
+    margin-top: 4px;
+    color: var(--ink);
+  }
+  .stat .sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .stat.red .value { color: var(--red); }
+
+  /* Toolbar */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 24px;
+    flex-wrap: wrap;
+  }
+  .search {
+    flex: 1;
+    min-width: 240px;
+    max-width: 420px;
+    position: relative;
+  }
+  .search input {
+    width: 100%;
+    padding: 9px 12px 9px 34px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    background: var(--white);
+  }
+  .search input:focus { outline: 2px solid var(--red); outline-offset: -1px; border-color: var(--red); }
+  .search::before {
+    content: '🔍';
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 14px;
+    opacity: .5;
+  }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    background: var(--red-soft);
+    color: var(--red-dark);
+    border: 1px solid var(--red);
+    border-radius: 100px;
+    padding: 4px 10px;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+  }
+  .chip button {
+    border: none;
+    background: transparent;
+    color: var(--red-dark);
+    padding: 0;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  /* Table */
+  .table-wrap {
+    margin: 0 24px 24px;
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: auto;
+    max-height: calc(100vh - 280px);
+  }
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13px;
+  }
+  thead th {
+    position: sticky;
+    top: 0;
+    background: var(--white);
+    border-bottom: 2px solid var(--line);
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .3px;
+    color: var(--muted);
+    white-space: nowrap;
+    z-index: 10;
+  }
+  thead th .th-inner {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+  thead th .th-inner:hover { color: var(--ink); }
+  thead th .filter-btn {
+    border: none;
+    background: transparent;
+    padding: 0 2px;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 11px;
+  }
+  thead th .filter-btn.active { color: var(--red); }
+  thead th .sort-ind { font-size: 10px; opacity: .6; }
+
+  tbody td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  tbody tr:hover td { background: var(--bg); }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 100px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .pill.yes { background: var(--green-bg); color: var(--green); }
+  .pill.no  { background: var(--gray-bg); color: var(--gray); }
+  .pill.os-ios { background: #EFF6FF; color: #1D4ED8; }
+  .pill.os-android { background: #F0FDF4; color: #15803D; }
+  .pill.os-other { background: var(--gray-bg); color: var(--muted); }
+  .rating {
+    display: inline-block;
+    font-weight: 700;
+    color: var(--red);
+  }
+  .empty-cell { color: var(--gray); font-style: italic; }
+
+  /* Filter popover */
+  .popover {
+    position: absolute;
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.12);
+    padding: 12px;
+    min-width: 240px;
+    z-index: 100;
+  }
+  .popover h4 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    font-weight: 600;
+  }
+  .popover label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .popover input[type="checkbox"] { accent-color: var(--red); }
+  .popover input[type="text"], .popover input[type="number"], .popover input[type="date"] {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    margin: 4px 0;
+  }
+  .popover .row { display: flex; gap: 6px; }
+  .popover .actions {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+  }
+  .popover .actions button { padding: 5px 10px; font-size: 12px; }
+  .popover .opts-list { max-height: 220px; overflow-y: auto; }
+
+  /* Modal */
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15,23,42,.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 20px;
+  }
+  .modal {
+    background: var(--white);
+    border-radius: 12px;
+    max-width: 800px;
+    width: 100%;
+    max-height: 90vh;
+    overflow: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,.25);
+  }
+  .modal h2 {
+    margin: 0;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--line);
+    font-size: 18px;
+  }
+  .modal .body { padding: 20px 24px; }
+  .modal .footer {
+    padding: 14px 24px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+  .preview-table {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: auto;
+    max-height: 400px;
+    margin-top: 12px;
+  }
+  .preview-table table { font-size: 12px; }
+  .preview-table th { font-size: 10px; }
+  .preview-table td { padding: 6px 10px; }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--ink);
+    color: var(--white);
+    padding: 12px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    z-index: 300;
+    box-shadow: 0 8px 24px rgba(0,0,0,.2);
+    animation: slideIn .2s ease-out;
+  }
+  .toast.error { background: var(--red); }
+  .toast.success { background: #15803D; }
+  @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 24px;
+    color: var(--muted);
+  }
+  .empty-state h3 { color: var(--ink); margin: 0 0 8px; }
+
+  .loading {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--line);
+    border-top-color: var(--red);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .progress {
+    height: 4px;
+    background: var(--line);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+  .progress > div {
+    height: 100%;
+    background: var(--red);
+    transition: width .3s;
+  }
+
+  /* Mobile */
+  @media (max-width: 900px) {
+    .stats { grid-template-columns: repeat(3, 1fr); }
+    header.top { padding: 12px 16px; }
+    header.top .logo { height: 44px; }
+    .toolbar, .stats { padding-left: 16px; padding-right: 16px; }
+    .table-wrap { margin: 0 16px 16px; }
+  }
+  @media (max-width: 540px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    header.top .logo { height: 36px; }
+    .stat .value { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <img src="assets/logo.svg" alt="Te acompaña" class="logo">
+  <div class="actions">
+    <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none">
+    <button class="ghost" onclick="exportCsv()">Exportar CSV</button>
+    <button class="primary" onclick="document.getElementById('fileInput').click()">Subir Excel</button>
+  </div>
+</header>
+
+<section class="stats" id="stats"></section>
+
+<div class="toolbar">
+  <div class="search">
+    <input type="text" id="globalSearch" placeholder="Buscar nombre, email, teléfono…" oninput="onGlobalSearch(event)">
+  </div>
+  <div class="chips" id="filterChips"></div>
+  <div style="margin-left:auto;color:var(--muted);font-size:12px;" id="rowCount"></div>
+</div>
+
+<div class="table-wrap" id="tableWrap">
+  <div class="empty-state">
+    <h3>Sin datos cargados</h3>
+    <p>Sube el Excel de usuarios para empezar.</p>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="popoverRoot"></div>
+<div id="toastRoot"></div>
+
+<script>
+//===============================================================
+// Config
+//===============================================================
+const SB_URL = 'https://udlkorcjenhixpuseney.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkbGtvcmNqZW5oaXhwdXNlbmV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMzUyODAsImV4cCI6MjA4ODkxMTI4MH0.I7cTG9Tkn2RX5ledviEvfoH7Psw67DmfysfHu02oIXg';
+const TABLE = 'ta_users';
+
+// Excel column letters (real positions, NOT the header text — see plan)
+const XLSX_MAP = {
+  user_id:              'D',
+  country_code:         'E',
+  phone:                'F',
+  brand:                'G',
+  model:                'H',
+  first_name:           'I',
+  last_name:            'J',
+  email:                'L',
+  age:                  'M',
+  registered_at:        'O',
+  app_rating:           'Q',
+  os:                   'R',
+  has_alerts:           'Y',
+  has_security_group:   'Z',
+  used_acompana:        'AB',
+  used_night_security:  'AC',
+  app_installed:        'AE',
+  has_widget:           'AF',
+};
+
+// UI columns in display order
+const COLS = [
+  { key: 'country_code',        label: 'Cód. País',     type: 'multi',      align: 'center' },
+  { key: 'phone',               label: 'Teléfono',       type: 'text' },
+  { key: 'os',                  label: 'SO',             type: 'multi',     align: 'center' },
+  { key: 'brand',               label: 'Marca',          type: 'multi' },
+  { key: 'first_name',          label: 'Nombre',         type: 'text' },
+  { key: 'last_name',           label: 'Apellidos',      type: 'text' },
+  { key: 'email',               label: 'Email',          type: 'text' },
+  { key: 'age',                 label: 'Edad',           type: 'numrange', align: 'center' },
+  { key: 'registered_at',       label: 'Fecha registro', type: 'daterange', align: 'center' },
+  { key: 'app_rating',          label: 'Valoración',     type: 'numrange', align: 'center' },
+  { key: 'has_alerts',          label: 'Alertas SOS',    type: 'bool',     align: 'center' },
+  { key: 'has_security_group',  label: 'Grupo Seg.',     type: 'bool',     align: 'center' },
+  { key: 'used_acompana',       label: 'Acompaña',       type: 'bool',     align: 'center' },
+  { key: 'used_night_security', label: 'Seg. Nocturna',  type: 'bool',     align: 'center' },
+  { key: 'app_installed',       label: 'Instalada',      type: 'bool',     align: 'center' },
+  { key: 'has_widget',          label: 'Widget',         type: 'bool',     align: 'center' },
+];
+
+//===============================================================
+// State
+//===============================================================
+const state = {
+  rows: [],
+  filters: {},                                    // { col_key: filter_value }
+  sort: { col: 'registered_at', dir: 'desc' },
+  globalSearch: '',
+  preview: null,                                  // pending upload preview
+};
+
+//===============================================================
+// Supabase helper
+//===============================================================
+async function sb(path, opts = {}) {
+  const { headers: extra, ...rest } = opts;
+  const res = await fetch(SB_URL + '/rest/v1/' + path, {
+    headers: {
+      'apikey': SB_KEY,
+      'Authorization': 'Bearer ' + SB_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation',
+      ...(extra || {}),
+    },
+    ...rest,
+  });
+  const txt = await res.text();
+  if (!res.ok) throw new Error(`Supabase ${res.status}: ${txt}`);
+  return txt ? JSON.parse(txt) : null;
+}
+
+//===============================================================
+// Excel parsing
+//===============================================================
+function cellText(ws, addr) {
+  const c = ws[addr];
+  if (!c) return '';
+  if (c.w !== undefined) return String(c.w).trim();
+  if (c.v !== undefined) return String(c.v).trim();
+  return '';
+}
+function cellNum(ws, addr) {
+  const c = ws[addr];
+  if (!c || c.v === undefined || c.v === '') return null;
+  const n = Number(c.v);
+  return Number.isFinite(n) ? n : null;
+}
+function cellBool(ws, addr) {
+  const t = cellText(ws, addr);
+  return t === '1' || t.toLowerCase() === 'true' || t.toLowerCase() === 'sí' || t.toLowerCase() === 'si';
+}
+function cellDateISO(ws, addr) {
+  // returns YYYY-MM-DD or null
+  const c = ws[addr];
+  if (!c) return null;
+  // SheetJS sometimes provides .w as the formatted text
+  if (c.w) {
+    const m = String(c.w).match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    const m2 = String(c.w).match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m2) return `${m2[3]}-${m2[2]}-${m2[1]}`;
+  }
+  if (typeof c.v === 'number') {
+    // Excel serial date
+    const d = XLSX.SSF.parse_date_code(c.v);
+    if (d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+  }
+  if (typeof c.v === 'string') {
+    const m = c.v.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  }
+  return null;
+}
+
+function parseExcel(buf) {
+  const wb = XLSX.read(buf, { type: 'array', cellDates: false });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const ref = ws['!ref'];
+  if (!ref) throw new Error('La hoja está vacía');
+  const range = XLSX.utils.decode_range(ref);
+
+  // Sanity check: column E of first data row should look like a country code (pure digits, 1-4 chars)
+  const firstDataRowIdx = range.s.r + 2;            // +1 to skip header, +1 because rows are 1-indexed in excel addr
+  const probe_E = cellText(ws, 'E' + firstDataRowIdx);
+  const probe_F = cellText(ws, 'F' + firstDataRowIdx);
+  const eOk = /^\d{1,4}$/.test(probe_E);
+  const fOk = /^\d{6,15}$/.test(probe_F);
+  // Try a couple more rows in case the first user is incomplete (QuadramAdmin)
+  if (!eOk || !fOk) {
+    let found = false;
+    for (let r = firstDataRowIdx; r <= Math.min(firstDataRowIdx + 5, range.e.r + 1); r++) {
+      const e = cellText(ws, 'E' + r);
+      const f = cellText(ws, 'F' + r);
+      if (/^\d{1,4}$/.test(e) && /^\d{6,15}$/.test(f)) { found = true; break; }
+    }
+    if (!found) {
+      throw new Error('El Excel no parece tener los datos en las columnas esperadas (E=cód. país, F=teléfono). Revisa que sea el archivo correcto.');
+    }
+  }
+
+  const rows = [];
+  for (let r = range.s.r + 1; r <= range.e.r; r++) {
+    const rowAddr = (col) => col + (r + 1);
+    const phone = cellText(ws, rowAddr(XLSX_MAP.phone));
+    if (!phone) continue;       // skip rows without a phone (admin/test rows)
+    const ageRaw = cellNum(ws, rowAddr(XLSX_MAP.age));
+    const ratingRaw = cellNum(ws, rowAddr(XLSX_MAP.app_rating));
+    const acompanaRaw = cellNum(ws, rowAddr(XLSX_MAP.used_acompana));
+    const nightRaw = cellNum(ws, rowAddr(XLSX_MAP.used_night_security));
+    const row = {
+      user_id:              cellText(ws, rowAddr(XLSX_MAP.user_id)) || null,
+      country_code:         cellText(ws, rowAddr(XLSX_MAP.country_code)) || null,
+      phone:                phone,
+      brand:                cellText(ws, rowAddr(XLSX_MAP.brand)) || null,
+      model:                cellText(ws, rowAddr(XLSX_MAP.model)) || null,
+      first_name:           cellText(ws, rowAddr(XLSX_MAP.first_name)) || null,
+      last_name:            cellText(ws, rowAddr(XLSX_MAP.last_name)) || null,
+      email:                cellText(ws, rowAddr(XLSX_MAP.email)) || null,
+      age:                  ageRaw,
+      registered_at:        cellDateISO(ws, rowAddr(XLSX_MAP.registered_at)),
+      app_rating:           ratingRaw,
+      os:                   cellText(ws, rowAddr(XLSX_MAP.os)) || null,
+      has_alerts:           cellBool(ws, rowAddr(XLSX_MAP.has_alerts)),
+      has_security_group:   cellBool(ws, rowAddr(XLSX_MAP.has_security_group)),
+      used_acompana:        (acompanaRaw || 0) > 0,
+      used_night_security:  (nightRaw || 0) > 0,
+      app_installed:        cellBool(ws, rowAddr(XLSX_MAP.app_installed)),
+      has_widget:           cellBool(ws, rowAddr(XLSX_MAP.has_widget)),
+    };
+    rows.push(row);
+  }
+  return rows;
+}
+
+//===============================================================
+// Upload flow
+//===============================================================
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = '';                              // allow re-select same file
+  try {
+    const buf = await file.arrayBuffer();
+    const rows = parseExcel(buf);
+    if (!rows.length) {
+      toast('No se han encontrado filas con teléfono en el Excel.', 'error');
+      return;
+    }
+    state.preview = { rows, filename: file.name };
+    renderPreviewModal();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Error parseando el Excel', 'error');
+  }
+});
+
+async function confirmUpload() {
+  const rows = state.preview.rows;
+  state.preview = null;
+  closeModal();
+  const total = rows.length;
+  let done = 0;
+  showProgressToast(`Subiendo 0 / ${total}…`);
+  try {
+    const batchSize = 100;
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const batch = rows.slice(i, i + batchSize);
+      await sb(TABLE + '?on_conflict=phone', {
+        method: 'POST',
+        headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(batch),
+      });
+      done += batch.length;
+      updateProgressToast(`Subiendo ${done} / ${total}…`);
+    }
+    hideProgressToast();
+    toast(`Cargados ${total} usuarios en Supabase.`, 'success');
+    await loadAll();
+    render();
+  } catch (err) {
+    hideProgressToast();
+    console.error(err);
+    toast(err.message || 'Error subiendo a Supabase', 'error');
+  }
+}
+
+//===============================================================
+// Load from Supabase
+//===============================================================
+async function loadAll() {
+  // pull all rows; PostgREST returns max 1000 by default — paginate just in case
+  const rows = [];
+  let offset = 0;
+  const limit = 1000;
+  while (true) {
+    const page = await sb(`${TABLE}?select=*&order=registered_at.desc.nullslast&limit=${limit}&offset=${offset}`);
+    rows.push(...page);
+    if (page.length < limit) break;
+    offset += limit;
+  }
+  state.rows = rows;
+}
+
+//===============================================================
+// Filtering
+//===============================================================
+function passesFilters(row) {
+  // Global search
+  if (state.globalSearch) {
+    const q = state.globalSearch.toLowerCase();
+    const hay = [row.first_name, row.last_name, row.email, row.phone, row.brand, row.model]
+      .filter(Boolean).map(s => String(s).toLowerCase()).join(' ');
+    if (!hay.includes(q)) return false;
+  }
+  for (const [key, f] of Object.entries(state.filters)) {
+    if (f == null) continue;
+    const col = COLS.find(c => c.key === key);
+    if (!col) continue;
+    const v = row[key];
+    if (col.type === 'multi') {
+      // f is an array of allowed values; null/empty represented by ''
+      const repr = v == null || v === '' ? '' : String(v);
+      if (!f.includes(repr)) return false;
+    } else if (col.type === 'text') {
+      const q = String(f).toLowerCase();
+      if (!q) continue;
+      if (!String(v || '').toLowerCase().includes(q)) return false;
+    } else if (col.type === 'numrange') {
+      const num = v == null ? null : Number(v);
+      if (f.min != null && (num == null || num < f.min)) return false;
+      if (f.max != null && (num == null || num > f.max)) return false;
+    } else if (col.type === 'daterange') {
+      const d = v || '';
+      if (f.from && (!d || d < f.from)) return false;
+      if (f.to && (!d || d > f.to)) return false;
+    } else if (col.type === 'bool') {
+      // f is 'yes' | 'no'
+      const truthy = !!v;
+      if (f === 'yes' && !truthy) return false;
+      if (f === 'no' && truthy) return false;
+    }
+  }
+  return true;
+}
+
+function getFilteredSorted() {
+  let r = state.rows.filter(passesFilters);
+  const { col, dir } = state.sort;
+  const m = dir === 'asc' ? 1 : -1;
+  r = r.slice().sort((a, b) => {
+    const av = a[col]; const bv = b[col];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * m;
+    return String(av).localeCompare(String(bv)) * m;
+  });
+  return r;
+}
+
+//===============================================================
+// Render
+//===============================================================
+function render() {
+  renderStats();
+  renderChips();
+  renderTable();
+  renderRowCount();
+}
+
+function renderStats() {
+  const all = state.rows;
+  const t = all.length;
+  const ios = all.filter(r => r.os === 'iOS').length;
+  const android = all.filter(r => r.os === 'Android').length;
+  const installed = all.filter(r => r.app_installed).length;
+  const widget = all.filter(r => r.has_widget).length;
+  const grupo = all.filter(r => r.has_security_group).length;
+  const alertas = all.filter(r => r.has_alerts).length;
+  const pct = (n) => t ? Math.round(n * 100 / t) + '%' : '—';
+  const html = `
+    <div class="stat red"><div class="label">Usuarios</div><div class="value">${t}</div><div class="sub">en base de datos</div></div>
+    <div class="stat"><div class="label">iOS</div><div class="value">${ios}</div><div class="sub">${pct(ios)}</div></div>
+    <div class="stat"><div class="label">Android</div><div class="value">${android}</div><div class="sub">${pct(android)}</div></div>
+    <div class="stat"><div class="label">App instalada</div><div class="value">${installed}</div><div class="sub">${pct(installed)}</div></div>
+    <div class="stat"><div class="label">Widget</div><div class="value">${widget}</div><div class="sub">${pct(widget)}</div></div>
+    <div class="stat"><div class="label">Grupo de seguridad</div><div class="value">${grupo}</div><div class="sub">${pct(grupo)}</div></div>
+  `;
+  document.getElementById('stats').innerHTML = html;
+}
+
+function renderChips() {
+  const wrap = document.getElementById('filterChips');
+  const chips = [];
+  if (state.globalSearch) {
+    chips.push(`<span class="chip">Buscar: "${escapeHtml(state.globalSearch)}" <button onclick="clearGlobalSearch()">×</button></span>`);
+  }
+  for (const [key, f] of Object.entries(state.filters)) {
+    if (f == null) continue;
+    const col = COLS.find(c => c.key === key);
+    if (!col) continue;
+    let label = col.label;
+    let val = '';
+    if (col.type === 'multi') val = (f.length === 0) ? 'ninguno' : (f.length <= 3 ? f.map(x => x || '∅').join(', ') : `${f.length} valores`);
+    else if (col.type === 'text') val = `"${f}"`;
+    else if (col.type === 'numrange') val = `${f.min ?? '−∞'} ≤ x ≤ ${f.max ?? '∞'}`;
+    else if (col.type === 'daterange') val = `${f.from || ''} → ${f.to || ''}`;
+    else if (col.type === 'bool') val = f === 'yes' ? 'Sí' : 'No';
+    chips.push(`<span class="chip">${label}: ${escapeHtml(val)} <button onclick="clearFilter('${key}')">×</button></span>`);
+  }
+  wrap.innerHTML = chips.join('');
+}
+
+function renderTable() {
+  const wrap = document.getElementById('tableWrap');
+  if (!state.rows.length) {
+    wrap.innerHTML = `
+      <div class="empty-state">
+        <h3>Sin datos cargados</h3>
+        <p>Sube el Excel de usuarios para empezar.</p>
+      </div>`;
+    return;
+  }
+  const filtered = getFilteredSorted();
+  const head = COLS.map(c => {
+    const active = state.filters[c.key] != null ? 'active' : '';
+    const sortInd = state.sort.col === c.key ? (state.sort.dir === 'asc' ? '▲' : '▼') : '';
+    return `
+      <th style="text-align:${c.align||'left'}">
+        <span class="th-inner" onclick="onSortClick('${c.key}', event)">
+          ${c.label} <span class="sort-ind">${sortInd}</span>
+        </span>
+        <button class="filter-btn ${active}" title="Filtrar" onclick="openFilter('${c.key}', event)">▾</button>
+      </th>`;
+  }).join('');
+  const body = filtered.map(r => `
+    <tr>
+      ${COLS.map(c => `<td style="text-align:${c.align||'left'}">${renderCell(r, c)}</td>`).join('')}
+    </tr>
+  `).join('');
+  wrap.innerHTML = `
+    <table>
+      <thead><tr>${head}</tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+  `;
+}
+
+function renderCell(row, col) {
+  const v = row[col.key];
+  if (col.type === 'bool') {
+    return v ? '<span class="pill yes">Sí</span>' : '<span class="pill no">No</span>';
+  }
+  if (col.key === 'os') {
+    const cls = v === 'iOS' ? 'os-ios' : v === 'Android' ? 'os-android' : 'os-other';
+    return `<span class="pill ${cls}">${escapeHtml(v || '—')}</span>`;
+  }
+  if (col.key === 'app_rating') {
+    return v == null ? '<span class="empty-cell">—</span>' : `<span class="rating">${v}</span>`;
+  }
+  if (v == null || v === '') return '<span class="empty-cell">—</span>';
+  return escapeHtml(String(v));
+}
+
+function renderRowCount() {
+  const total = state.rows.length;
+  const filtered = getFilteredSorted().length;
+  document.getElementById('rowCount').textContent = filtered === total ? `${total} usuarios` : `${filtered} de ${total} usuarios`;
+}
+
+//===============================================================
+// Filter popover
+//===============================================================
+function openFilter(key, event) {
+  event.stopPropagation();
+  const col = COLS.find(c => c.key === key);
+  const btn = event.currentTarget;
+  const r = btn.getBoundingClientRect();
+  const top = r.bottom + window.scrollY + 4;
+  const left = Math.min(r.left + window.scrollX, window.innerWidth - 260);
+
+  let body = '';
+  const cur = state.filters[key];
+  if (col.type === 'text') {
+    body = `<input type="text" id="popInput" placeholder="Contiene…" value="${escapeAttr(cur || '')}">`;
+  } else if (col.type === 'multi') {
+    const values = uniqueValues(key);
+    const sel = cur ? new Set(cur) : new Set(values);
+    body = `
+      <div class="opts-list">
+        ${values.map(v => `
+          <label><input type="checkbox" value="${escapeAttr(v)}" ${sel.has(v) ? 'checked' : ''}> ${escapeHtml(v || '(vacío)')}</label>
+        `).join('')}
+      </div>
+      <div style="display:flex;gap:6px;margin-top:6px;">
+        <button onclick="popMultiAll(true)">Todos</button>
+        <button onclick="popMultiAll(false)">Ninguno</button>
+      </div>`;
+  } else if (col.type === 'numrange') {
+    body = `
+      <div class="row">
+        <input type="number" id="popMin" placeholder="Mín" value="${cur && cur.min != null ? cur.min : ''}">
+        <input type="number" id="popMax" placeholder="Máx" value="${cur && cur.max != null ? cur.max : ''}">
+      </div>`;
+  } else if (col.type === 'daterange') {
+    body = `
+      <div class="row">
+        <input type="date" id="popFrom" value="${(cur && cur.from) || ''}">
+        <input type="date" id="popTo" value="${(cur && cur.to) || ''}">
+      </div>`;
+  } else if (col.type === 'bool') {
+    body = `
+      <label><input type="radio" name="boolFilter" value="all" ${!cur ? 'checked' : ''}> Todos</label>
+      <label><input type="radio" name="boolFilter" value="yes" ${cur === 'yes' ? 'checked' : ''}> Sí</label>
+      <label><input type="radio" name="boolFilter" value="no" ${cur === 'no' ? 'checked' : ''}> No</label>`;
+  }
+
+  const html = `
+    <div class="popover" style="top:${top}px; left:${left}px;" onclick="event.stopPropagation()">
+      <h4>${col.label}</h4>
+      ${body}
+      <div class="actions">
+        <button onclick="clearFilter('${key}'); closePopover();">Limpiar</button>
+        <button class="primary" onclick="applyFilter('${key}', '${col.type}')">Aplicar</button>
+      </div>
+    </div>`;
+  document.getElementById('popoverRoot').innerHTML = html;
+  setTimeout(() => {
+    const inp = document.getElementById('popInput');
+    if (inp) inp.focus();
+  }, 50);
+}
+
+function popMultiAll(all) {
+  const cbs = document.querySelectorAll('#popoverRoot .opts-list input[type=checkbox]');
+  cbs.forEach(c => c.checked = all);
+}
+
+function applyFilter(key, type) {
+  if (type === 'text') {
+    const v = document.getElementById('popInput').value.trim();
+    state.filters[key] = v || null;
+  } else if (type === 'multi') {
+    const cbs = document.querySelectorAll('#popoverRoot .opts-list input[type=checkbox]');
+    const sel = Array.from(cbs).filter(c => c.checked).map(c => c.value);
+    const all = uniqueValues(key);
+    state.filters[key] = (sel.length === all.length) ? null : sel;
+  } else if (type === 'numrange') {
+    const minV = document.getElementById('popMin').value;
+    const maxV = document.getElementById('popMax').value;
+    if (!minV && !maxV) state.filters[key] = null;
+    else state.filters[key] = { min: minV ? Number(minV) : null, max: maxV ? Number(maxV) : null };
+  } else if (type === 'daterange') {
+    const from = document.getElementById('popFrom').value;
+    const to = document.getElementById('popTo').value;
+    if (!from && !to) state.filters[key] = null;
+    else state.filters[key] = { from: from || null, to: to || null };
+  } else if (type === 'bool') {
+    const v = document.querySelector('#popoverRoot input[name=boolFilter]:checked').value;
+    state.filters[key] = (v === 'all') ? null : v;
+  }
+  closePopover();
+  render();
+}
+
+function clearFilter(key) {
+  delete state.filters[key];
+  render();
+}
+
+function closePopover() {
+  document.getElementById('popoverRoot').innerHTML = '';
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.popover') && !e.target.closest('.filter-btn')) closePopover();
+});
+
+function uniqueValues(key) {
+  const set = new Set();
+  for (const r of state.rows) {
+    set.add(r[key] == null || r[key] === '' ? '' : String(r[key]));
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+//===============================================================
+// Sort + global search
+//===============================================================
+function onSortClick(key) {
+  if (state.sort.col === key) {
+    state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    state.sort = { col: key, dir: 'asc' };
+  }
+  render();
+}
+function onGlobalSearch(e) {
+  state.globalSearch = e.target.value.trim();
+  render();
+}
+function clearGlobalSearch() {
+  state.globalSearch = '';
+  document.getElementById('globalSearch').value = '';
+  render();
+}
+
+//===============================================================
+// CSV export
+//===============================================================
+function exportCsv() {
+  const rows = getFilteredSorted();
+  if (!rows.length) { toast('No hay filas para exportar', 'error'); return; }
+  const headers = COLS.map(c => c.label);
+  const lines = [headers.join(';')];
+  for (const r of rows) {
+    const cells = COLS.map(c => {
+      let v = r[c.key];
+      if (c.type === 'bool') v = v ? 'Sí' : 'No';
+      if (v == null) v = '';
+      v = String(v).replace(/"/g, '""');
+      if (/[;"\n]/.test(v)) v = `"${v}"`;
+      return v;
+    });
+    lines.push(cells.join(';'));
+  }
+  const csv = '﻿' + lines.join('\n');     // BOM for Excel UTF-8
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const today = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `te-acompana-usuarios-${today}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+//===============================================================
+// Modal (preview)
+//===============================================================
+function renderPreviewModal() {
+  const { rows, filename } = state.preview;
+  const sample = rows.slice(0, 10);
+  const cols = ['phone', 'first_name', 'last_name', 'email', 'os', 'brand', 'registered_at'];
+  const html = `
+    <div class="backdrop" onclick="if(event.target===this)cancelUpload()">
+      <div class="modal">
+        <h2>Confirmar subida · ${escapeHtml(filename)}</h2>
+        <div class="body">
+          <p>Se han detectado <strong>${rows.length}</strong> usuarios en el Excel. Se hará upsert por teléfono: los existentes se actualizan y los nuevos se insertan.</p>
+          <div class="preview-table">
+            <table>
+              <thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>
+              <tbody>
+                ${sample.map(r => `<tr>${cols.map(c => `<td>${escapeHtml(r[c] ?? '')}</td>`).join('')}</tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+          <p style="font-size:12px;color:var(--muted);margin-top:8px;">Mostrando ${sample.length} de ${rows.length} filas.</p>
+        </div>
+        <div class="footer">
+          <button onclick="cancelUpload()">Cancelar</button>
+          <button class="primary" onclick="confirmUpload()">Subir a Supabase</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('modalRoot').innerHTML = html;
+}
+function cancelUpload() {
+  state.preview = null;
+  closeModal();
+}
+function closeModal() {
+  document.getElementById('modalRoot').innerHTML = '';
+}
+
+//===============================================================
+// Toast
+//===============================================================
+function toast(msg, type = '') {
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  document.getElementById('toastRoot').appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+let progressToastEl = null;
+function showProgressToast(msg) {
+  hideProgressToast();
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = `<span class="loading"></span><span class="msg">${escapeHtml(msg)}</span>`;
+  progressToastEl = t;
+  document.getElementById('toastRoot').appendChild(t);
+}
+function updateProgressToast(msg) {
+  if (!progressToastEl) return;
+  progressToastEl.querySelector('.msg').textContent = msg;
+}
+function hideProgressToast() {
+  if (progressToastEl) { progressToastEl.remove(); progressToastEl = null; }
+}
+
+//===============================================================
+// Util
+//===============================================================
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+function escapeAttr(s) { return escapeHtml(s); }
+
+//===============================================================
+// Boot
+//===============================================================
+(async () => {
+  try {
+    await loadAll();
+  } catch (err) {
+    console.error(err);
+    toast('No se pudo cargar la base de datos: ' + err.message, 'error');
+  }
+  render();
+})();
+</script>
+
+</body>
+</html>

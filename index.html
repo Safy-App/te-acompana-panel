@@ -829,17 +829,23 @@ function parseExcel(buf) {
   }
 
   // Iterar filas. La cabecera es range.s.r (fila 1 del rango).
-  const rows = [];
+  // Deduplicamos por teléfono mientras leemos: si un teléfono aparece dos
+  // veces en el Excel, nos quedamos con la última ocurrencia. Esto es
+  // imprescindible porque PostgREST no permite que un mismo `ON CONFLICT`
+  // afecte a la misma fila destino dos veces dentro del mismo batch.
+  const byPhone = new Map();
+  let totalWithPhone = 0;
   for (let r = range.s.r + 1; r <= range.e.r; r++) {
     const at = (col) => col ? col + (r + 1) : null;
     const phone = cellText(ws, at(map.phone));
     if (!phone) continue;
+    totalWithPhone++;
 
     // Para los contadores (Acompaña, Seg. Nocturna), >0 → true.
     const acompanaRaw = map.used_acompana ? cellNum(ws, at(map.used_acompana)) : null;
     const nightRaw    = map.used_night_security ? cellNum(ws, at(map.used_night_security)) : null;
 
-    rows.push({
+    byPhone.set(phone, {
       user_id:              map.user_id        ? (cellText(ws, at(map.user_id)) || null) : null,
       country_code:         map.country_code   ? (cellText(ws, at(map.country_code)) || null) : null,
       phone:                phone,
@@ -860,8 +866,10 @@ function parseExcel(buf) {
       has_widget:           map.has_widget     ? cellBool(ws, at(map.has_widget)) : false,
     });
   }
-  // Adjunta el mapa detectado al array para debugging y para mostrarlo en el preview.
+  const rows = Array.from(byPhone.values());
+  // Adjunta metadatos al array para mostrarlos en el preview y para debugging.
   rows.detectedMap = map;
+  rows.duplicatesRemoved = totalWithPhone - rows.length;
   return rows;
 }
 
@@ -1347,7 +1355,7 @@ function renderPreviewModal() {
           <div class="target-clone">
             Los datos se cargarán en el clon <strong>${escapeHtml(cloneName)}</strong>. Los demás clones no se ven afectados.
           </div>
-          <p>Se han detectado <strong>${rows.length}</strong> usuarios en el Excel. Upsert por (clon + teléfono): los existentes se actualizan, los nuevos se insertan.</p>
+          <p>Se han detectado <strong>${rows.length}</strong> usuarios únicos en el Excel${rows.duplicatesRemoved ? ` (deduplicados ${rows.duplicatesRemoved} teléfonos repetidos: se ha quedado la última ocurrencia)` : ''}. Upsert por (clon + teléfono): los existentes se actualizan, los nuevos se insertan.</p>
           <details style="margin-top:8px;margin-bottom:12px;">
             <summary style="cursor:pointer;font-size:12px;color:var(--muted);">Mapeo de columnas detectado (${Object.keys(map).length} de ${mapEntries.length} campos)</summary>
             <div class="map-pills">${mapHtml}</div>

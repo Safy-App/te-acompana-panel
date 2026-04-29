@@ -404,6 +404,18 @@
     font-weight: 500;
     margin-bottom: 12px;
   }
+  .map-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .map-pill {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+    background: var(--gray-bg);
+    color: var(--muted);
+  }
+  .map-pill.mapped { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+  .map-pill.unmapped { background: #FFFBEB; color: #B45309; border-color: #F59E0B; }
+  .map-pill strong { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
   /* Toast */
   .toast {
@@ -502,7 +514,9 @@ const USERS_TABLE = 'clone_users';
 const SS_KEY = 'safy_panel_active_clone';
 
 // Excel column letters (real positions, NOT the header text — see CLAUDE.md)
-const XLSX_MAP = {
+// Te acompaña fallback (Quadram export con desfase de 2 columnas, sin headers
+// reconocibles para 'phone'). Se usa solo si la detección por cabeceras falla.
+const TA_FALLBACK_MAP = {
   user_id:              'D',
   country_code:         'E',
   phone:                'F',
@@ -521,6 +535,31 @@ const XLSX_MAP = {
   used_night_security:  'AC',
   app_installed:        'AE',
   has_widget:           'AF',
+};
+
+// Sinónimos de cabeceras (normalizados: solo a-z0-9). Cubre el formato Safy
+// original, Te acompaña/Quadram, y formatos en español/inglés. Primer match
+// gana, así que pongo los más específicos primero. Para añadir un formato
+// nuevo basta con sumar sinónimos a la lista del campo correspondiente.
+const FIELD_SYNONYMS = {
+  user_id:              ['idusuario', 'userid', 'iduser'],
+  country_code:         ['codigopais', 'codpais', 'countrycode'],
+  phone:                ['telefono', 'phone', 'tel', 'movil'],
+  brand:                ['marca', 'brand'],
+  model:                ['modelo', 'model'],
+  first_name:           ['nombre', 'firstname', 'name'],
+  last_name:            ['apellidos', 'apellido', 'lastname', 'surname'],
+  email:                ['email', 'correo', 'mail'],
+  age:                  ['edad', 'age'],
+  registered_at:        ['fecharegistro', 'fechacreacion', 'createdatdate', 'createdat', 'registrationdate'],
+  app_rating:           ['apprating', 'valoracion', 'valoracionapp', 'rating'],
+  os:                   ['sistemaoperativo', 'so', 'os'],
+  has_alerts:           ['alertasemitidas', 'hasalerts', 'alertas'],
+  has_security_group:   ['telefonosconfianza', 'hastrustedphones', 'gruposeguridad', 'gruposeguro'],
+  used_acompana:        ['alertascentinela', 'centinelacount', 'centinela', 'usoacompana', 'acompana'],
+  used_night_security:  ['alarmasnocturnas', 'nightalarmcount', 'segnocturna', 'seguridadnocturna'],
+  app_installed:        ['appinstalada', 'appinstalled'],
+  has_widget:           ['widgetactivo', 'activewidget', 'widget'],
 };
 
 const COLS = [
@@ -704,8 +743,9 @@ function cellNum(ws, addr) {
   return Number.isFinite(n) ? n : null;
 }
 function cellBool(ws, addr) {
-  const t = cellText(ws, addr);
-  return t === '1' || t.toLowerCase() === 'true' || t.toLowerCase() === 'sí' || t.toLowerCase() === 'si';
+  const t = cellText(ws, addr).toLowerCase();
+  if (!t) return false;
+  return t === '1' || t === 'true' || t === 'sí' || t === 'si' || t === 'yes' || t === 'y';
 }
 function cellDateISO(ws, addr) {
   const c = ws[addr];
@@ -727,6 +767,37 @@ function cellDateISO(ws, addr) {
   return null;
 }
 
+// Normaliza un header para buscar en FIELD_SYNONYMS: minúsculas, NFD,
+// strip diacríticos y deja solo a-z0-9. "Codigo_Pais" → "codigopais",
+// "Teléfono" → "telefono", "App Rating" → "apprating".
+function normalizeHeader(s) {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/ñ/g, 'n')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+// Lee la cabecera (primera fila del rango) y devuelve un mapa
+// {field → letraColumna}. Si no encuentra un campo, simplemente no
+// aparece en el resultado.
+function detectColumnMap(ws, range) {
+  const headers = {};            // letter → normalized header text
+  for (let c = range.s.c; c <= range.e.c; c++) {
+    const cellRef = XLSX.utils.encode_cell({ r: range.s.r, c });
+    const letter = XLSX.utils.encode_col(c);
+    const txt = cellText(ws, cellRef);
+    if (txt) headers[letter] = normalizeHeader(txt);
+  }
+  const map = {};
+  for (const [field, syns] of Object.entries(FIELD_SYNONYMS)) {
+    for (const [letter, h] of Object.entries(headers)) {
+      if (syns.includes(h)) { map[field] = letter; break; }
+    }
+  }
+  return { headers, map };
+}
+
 function parseExcel(buf) {
   const wb = XLSX.read(buf, { type: 'array', cellDates: false });
   const ws = wb.Sheets[wb.SheetNames[0]];
@@ -734,53 +805,63 @@ function parseExcel(buf) {
   if (!ref) throw new Error('La hoja está vacía');
   const range = XLSX.utils.decode_range(ref);
 
-  const firstDataRowIdx = range.s.r + 2;
-  const probe_E = cellText(ws, 'E' + firstDataRowIdx);
-  const probe_F = cellText(ws, 'F' + firstDataRowIdx);
-  const eOk = /^\d{1,4}$/.test(probe_E);
-  const fOk = /^\d{6,15}$/.test(probe_F);
-  if (!eOk || !fOk) {
-    let found = false;
-    for (let r = firstDataRowIdx; r <= Math.min(firstDataRowIdx + 5, range.e.r + 1); r++) {
-      const e = cellText(ws, 'E' + r);
+  // Estrategia 1: detectar columnas por sinónimos de cabecera (Safy, futuros formatos).
+  let { headers, map } = detectColumnMap(ws, range);
+
+  // Estrategia 2 (fallback Te acompaña): si no hay 'phone' detectado, probamos
+  // si la columna F del segundo registro parece un teléfono y, en ese caso,
+  // asumimos el mapping hardcodeado del export de Quadram.
+  if (!map.phone) {
+    let teAcompanaLikely = false;
+    for (let r = range.s.r + 2; r <= Math.min(range.s.r + 10, range.e.r + 1); r++) {
       const f = cellText(ws, 'F' + r);
-      if (/^\d{1,4}$/.test(e) && /^\d{6,15}$/.test(f)) { found = true; break; }
+      const e = cellText(ws, 'E' + r);
+      if (/^\d{6,15}$/.test(f) && /^\d{1,4}$/.test(e)) { teAcompanaLikely = true; break; }
     }
-    if (!found) {
-      throw new Error('El Excel no parece tener los datos en las columnas esperadas (E=cód. país, F=teléfono). Revisa que sea el archivo correcto.');
+    if (teAcompanaLikely) {
+      map = { ...TA_FALLBACK_MAP };
     }
   }
 
+  if (!map.phone) {
+    const sample = Object.entries(headers).slice(0, 8).map(([l,h]) => `${l}=${h}`).join(', ');
+    throw new Error(`No se ha encontrado columna de teléfono en el Excel. Cabeceras detectadas: ${sample || '(vacías)'}…`);
+  }
+
+  // Iterar filas. La cabecera es range.s.r (fila 1 del rango).
   const rows = [];
   for (let r = range.s.r + 1; r <= range.e.r; r++) {
-    const rowAddr = (col) => col + (r + 1);
-    const phone = cellText(ws, rowAddr(XLSX_MAP.phone));
+    const at = (col) => col ? col + (r + 1) : null;
+    const phone = cellText(ws, at(map.phone));
     if (!phone) continue;
-    const ageRaw = cellNum(ws, rowAddr(XLSX_MAP.age));
-    const ratingRaw = cellNum(ws, rowAddr(XLSX_MAP.app_rating));
-    const acompanaRaw = cellNum(ws, rowAddr(XLSX_MAP.used_acompana));
-    const nightRaw = cellNum(ws, rowAddr(XLSX_MAP.used_night_security));
+
+    // Para los contadores (Acompaña, Seg. Nocturna), >0 → true.
+    const acompanaRaw = map.used_acompana ? cellNum(ws, at(map.used_acompana)) : null;
+    const nightRaw    = map.used_night_security ? cellNum(ws, at(map.used_night_security)) : null;
+
     rows.push({
-      user_id:              cellText(ws, rowAddr(XLSX_MAP.user_id)) || null,
-      country_code:         cellText(ws, rowAddr(XLSX_MAP.country_code)) || null,
+      user_id:              map.user_id        ? (cellText(ws, at(map.user_id)) || null) : null,
+      country_code:         map.country_code   ? (cellText(ws, at(map.country_code)) || null) : null,
       phone:                phone,
-      brand:                cellText(ws, rowAddr(XLSX_MAP.brand)) || null,
-      model:                cellText(ws, rowAddr(XLSX_MAP.model)) || null,
-      first_name:           cellText(ws, rowAddr(XLSX_MAP.first_name)) || null,
-      last_name:            cellText(ws, rowAddr(XLSX_MAP.last_name)) || null,
-      email:                cellText(ws, rowAddr(XLSX_MAP.email)) || null,
-      age:                  ageRaw,
-      registered_at:        cellDateISO(ws, rowAddr(XLSX_MAP.registered_at)),
-      app_rating:           ratingRaw,
-      os:                   cellText(ws, rowAddr(XLSX_MAP.os)) || null,
-      has_alerts:           cellBool(ws, rowAddr(XLSX_MAP.has_alerts)),
-      has_security_group:   cellBool(ws, rowAddr(XLSX_MAP.has_security_group)),
+      brand:                map.brand          ? (cellText(ws, at(map.brand)) || null) : null,
+      model:                map.model          ? (cellText(ws, at(map.model)) || null) : null,
+      first_name:           map.first_name     ? (cellText(ws, at(map.first_name)) || null) : null,
+      last_name:            map.last_name      ? (cellText(ws, at(map.last_name)) || null) : null,
+      email:                map.email          ? (cellText(ws, at(map.email)) || null) : null,
+      age:                  map.age            ? cellNum(ws, at(map.age)) : null,
+      registered_at:        map.registered_at  ? cellDateISO(ws, at(map.registered_at)) : null,
+      app_rating:           map.app_rating     ? cellNum(ws, at(map.app_rating)) : null,
+      os:                   map.os             ? (cellText(ws, at(map.os)) || null) : null,
+      has_alerts:           map.has_alerts          ? cellBool(ws, at(map.has_alerts)) : false,
+      has_security_group:   map.has_security_group  ? cellBool(ws, at(map.has_security_group)) : false,
       used_acompana:        (acompanaRaw || 0) > 0,
-      used_night_security:  (nightRaw || 0) > 0,
-      app_installed:        cellBool(ws, rowAddr(XLSX_MAP.app_installed)),
-      has_widget:           cellBool(ws, rowAddr(XLSX_MAP.has_widget)),
+      used_night_security:  (nightRaw    || 0) > 0,
+      app_installed:        map.app_installed  ? cellBool(ws, at(map.app_installed)) : false,
+      has_widget:           map.has_widget     ? cellBool(ws, at(map.has_widget)) : false,
     });
   }
+  // Adjunta el mapa detectado al array para debugging y para mostrarlo en el preview.
+  rows.detectedMap = map;
   return rows;
 }
 
@@ -820,7 +901,7 @@ async function confirmUpload() {
   let done = 0;
   showProgressToast(`Subiendo 0 / ${total}…`);
   try {
-    const batchSize = 100;
+    const batchSize = 500;
     for (let i = 0; i < tagged.length; i += batchSize) {
       const batch = tagged.slice(i, i + batchSize);
       await sb(USERS_TABLE + '?on_conflict=clone_slug,phone', {
@@ -1233,6 +1314,31 @@ function renderPreviewModal() {
   const cloneName = state.clones.find(c => c.slug === targetClone)?.name || targetClone;
   const sample = rows.slice(0, 10);
   const cols = ['phone', 'first_name', 'last_name', 'email', 'os', 'brand', 'registered_at'];
+  const map = rows.detectedMap || {};
+  const mapEntries = [
+    ['phone',              'Teléfono'],
+    ['country_code',       'Cód. País'],
+    ['first_name',         'Nombre'],
+    ['last_name',          'Apellidos'],
+    ['email',              'Email'],
+    ['age',                'Edad'],
+    ['os',                 'SO'],
+    ['brand',              'Marca'],
+    ['registered_at',      'F. registro'],
+    ['app_rating',         'Valoración'],
+    ['has_alerts',         'Alertas'],
+    ['has_security_group', 'Grupo seg.'],
+    ['used_acompana',      'Acompaña'],
+    ['used_night_security','Seg. noct.'],
+    ['app_installed',      'Instalada'],
+    ['has_widget',         'Widget'],
+  ];
+  const mapHtml = mapEntries.map(([f, l]) => {
+    const letter = map[f];
+    const cls = letter ? 'mapped' : 'unmapped';
+    return `<span class="map-pill ${cls}">${l}: <strong>${letter || '—'}</strong></span>`;
+  }).join('');
+
   const html = `
     <div class="backdrop" onclick="if(event.target===this)cancelUpload()">
       <div class="modal">
@@ -1241,7 +1347,11 @@ function renderPreviewModal() {
           <div class="target-clone">
             Los datos se cargarán en el clon <strong>${escapeHtml(cloneName)}</strong>. Los demás clones no se ven afectados.
           </div>
-          <p>Se han detectado <strong>${rows.length}</strong> usuarios en el Excel. Se hará upsert por (clon + teléfono): los existentes se actualizan y los nuevos se insertan.</p>
+          <p>Se han detectado <strong>${rows.length}</strong> usuarios en el Excel. Upsert por (clon + teléfono): los existentes se actualizan, los nuevos se insertan.</p>
+          <details style="margin-top:8px;margin-bottom:12px;">
+            <summary style="cursor:pointer;font-size:12px;color:var(--muted);">Mapeo de columnas detectado (${Object.keys(map).length} de ${mapEntries.length} campos)</summary>
+            <div class="map-pills">${mapHtml}</div>
+          </details>
           <div class="preview-table">
             <table>
               <thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>
@@ -1250,7 +1360,7 @@ function renderPreviewModal() {
               </tbody>
             </table>
           </div>
-          <p style="font-size:12px;color:var(--muted);margin-top:8px;">Mostrando ${sample.length} de ${rows.length} filas.</p>
+          <p style="font-size:12px;color:var(--muted);margin-top:8px;">Mostrando ${sample.length} de ${rows.length} filas. La subida puede tardar ~1 min para volúmenes grandes (50k+).</p>
         </div>
         <div class="footer">
           <button onclick="cancelUpload()">Cancelar</button>

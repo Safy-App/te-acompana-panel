@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Te acompaña · Panel de Control</title>
+<title>Safy · Panel de Clones</title>
 <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
@@ -57,14 +57,76 @@
     font-weight: 500;
     transition: all .15s;
   }
-  button:hover { background: var(--gray-bg); }
+  button:hover:not(:disabled) { background: var(--gray-bg); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
   button.primary {
     background: var(--red);
     color: var(--white);
     border-color: var(--red);
   }
-  button.primary:hover { background: var(--red-dark); border-color: var(--red-dark); }
+  button.primary:hover:not(:disabled) { background: var(--red-dark); border-color: var(--red-dark); }
+  button.primary:disabled { background: var(--gray); border-color: var(--gray); }
   button.ghost { border-color: transparent; }
+
+  /* Tabs row */
+  nav.tabs-row {
+    display: flex;
+    gap: 4px;
+    padding: 8px 24px 0;
+    background: var(--white);
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    scrollbar-width: thin;
+    position: sticky;
+    top: 89px;
+    z-index: 40;
+  }
+  nav.tabs-row .tab {
+    padding: 10px 16px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 14px;
+    border-bottom: 3px solid transparent;
+    border-radius: 0;
+    margin-bottom: -1px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all .15s;
+  }
+  nav.tabs-row .tab:hover { color: var(--ink); background: transparent; }
+  nav.tabs-row .tab.active {
+    color: var(--red);
+    border-bottom-color: var(--red);
+    font-weight: 600;
+  }
+  nav.tabs-row .tab.add-tab {
+    color: var(--muted);
+    font-style: italic;
+    margin-left: 8px;
+    padding-left: 12px;
+    border-left: 1px solid var(--line);
+  }
+  nav.tabs-row .tab.add-tab:hover { color: var(--red); }
+
+  /* Active clone header */
+  .clone-header {
+    padding: 16px 24px 0;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .clone-header .clone-name {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .clone-header .clone-slug {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
 
   /* Stats */
   .stats {
@@ -162,7 +224,7 @@
     border: 1px solid var(--line);
     border-radius: 10px;
     overflow: auto;
-    max-height: calc(100vh - 280px);
+    max-height: calc(100vh - 360px);
   }
   table {
     width: 100%;
@@ -306,6 +368,15 @@
     font-size: 18px;
   }
   .modal .body { padding: 20px 24px; }
+  .modal .body input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  .modal .body input[type="text"]:focus { outline: 2px solid var(--red); outline-offset: -1px; border-color: var(--red); }
   .modal .footer {
     padding: 14px 24px;
     border-top: 1px solid var(--line);
@@ -323,6 +394,16 @@
   .preview-table table { font-size: 12px; }
   .preview-table th { font-size: 10px; }
   .preview-table td { padding: 6px 10px; }
+  .target-clone {
+    background: var(--red-soft);
+    color: var(--red-dark);
+    border: 1px solid var(--red);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 12px;
+  }
 
   /* Toast */
   .toast {
@@ -363,25 +444,13 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .progress {
-    height: 4px;
-    background: var(--line);
-    border-radius: 2px;
-    overflow: hidden;
-    margin: 8px 0;
-  }
-  .progress > div {
-    height: 100%;
-    background: var(--red);
-    transition: width .3s;
-  }
-
   /* Mobile */
   @media (max-width: 900px) {
     .stats { grid-template-columns: repeat(3, 1fr); }
     header.top { padding: 12px 16px; }
     header.top .logo { height: 44px; }
-    .toolbar, .stats { padding-left: 16px; padding-right: 16px; }
+    .toolbar, .stats, .clone-header { padding-left: 16px; padding-right: 16px; }
+    nav.tabs-row { padding-left: 16px; padding-right: 16px; }
     .table-wrap { margin: 0 16px 16px; }
   }
   @media (max-width: 540px) {
@@ -394,13 +463,17 @@
 <body>
 
 <header class="top">
-  <img src="assets/logo.svg" alt="Te acompaña" class="logo">
+  <img src="assets/logo.svg" alt="Safy · Panel de Clones" class="logo">
   <div class="actions">
     <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none">
     <button class="ghost" onclick="exportCsv()">Exportar CSV</button>
-    <button class="primary" onclick="document.getElementById('fileInput').click()">Subir Excel</button>
+    <button class="primary" id="uploadBtn" onclick="document.getElementById('fileInput').click()">Subir Excel</button>
   </div>
 </header>
+
+<nav class="tabs-row" id="tabsRow"></nav>
+
+<section class="clone-header" id="cloneHeader"></section>
 
 <section class="stats" id="stats"></section>
 
@@ -412,12 +485,7 @@
   <div style="margin-left:auto;color:var(--muted);font-size:12px;" id="rowCount"></div>
 </div>
 
-<div class="table-wrap" id="tableWrap">
-  <div class="empty-state">
-    <h3>Sin datos cargados</h3>
-    <p>Sube el Excel de usuarios para empezar.</p>
-  </div>
-</div>
+<div class="table-wrap" id="tableWrap"></div>
 
 <div id="modalRoot"></div>
 <div id="popoverRoot"></div>
@@ -429,9 +497,11 @@
 //===============================================================
 const SB_URL = 'https://udlkorcjenhixpuseney.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkbGtvcmNqZW5oaXhwdXNlbmV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMzUyODAsImV4cCI6MjA4ODkxMTI4MH0.I7cTG9Tkn2RX5ledviEvfoH7Psw67DmfysfHu02oIXg';
-const TABLE = 'ta_users';
+const CLONES_TABLE = 'clones';
+const USERS_TABLE = 'clone_users';
+const SS_KEY = 'safy_panel_active_clone';
 
-// Excel column letters (real positions, NOT the header text — see plan)
+// Excel column letters (real positions, NOT the header text — see CLAUDE.md)
 const XLSX_MAP = {
   user_id:              'D',
   country_code:         'E',
@@ -453,11 +523,10 @@ const XLSX_MAP = {
   has_widget:           'AF',
 };
 
-// UI columns in display order
 const COLS = [
-  { key: 'country_code',        label: 'Cód. País',     type: 'multi',      align: 'center' },
+  { key: 'country_code',        label: 'Cód. País',     type: 'multi',     align: 'center' },
   { key: 'phone',               label: 'Teléfono',       type: 'text' },
-  { key: 'os',                  label: 'SO',             type: 'multi',     align: 'center' },
+  { key: 'os',                  label: 'SO',             type: 'multi',    align: 'center' },
   { key: 'brand',               label: 'Marca',          type: 'multi' },
   { key: 'first_name',          label: 'Nombre',         type: 'text' },
   { key: 'last_name',           label: 'Apellidos',      type: 'text' },
@@ -477,11 +546,13 @@ const COLS = [
 // State
 //===============================================================
 const state = {
-  rows: [],
-  filters: {},                                    // { col_key: filter_value }
+  clones: [],            // [{ slug, name, position, created_at }]
+  activeClone: null,
+  rows: [],              // users for activeClone
+  filters: {},
   sort: { col: 'registered_at', dir: 'desc' },
   globalSearch: '',
-  preview: null,                                  // pending upload preview
+  preview: null,
 };
 
 //===============================================================
@@ -505,6 +576,118 @@ async function sb(path, opts = {}) {
 }
 
 //===============================================================
+// Loading
+//===============================================================
+async function loadClones() {
+  state.clones = await sb(`${CLONES_TABLE}?select=*&order=position.asc.nullslast,name.asc`);
+}
+
+async function loadUsers() {
+  if (!state.activeClone) { state.rows = []; return; }
+  const slug = encodeURIComponent(state.activeClone);
+  const rows = [];
+  let offset = 0;
+  const limit = 1000;
+  while (true) {
+    const page = await sb(`${USERS_TABLE}?select=*&clone_slug=eq.${slug}&order=registered_at.desc.nullslast&limit=${limit}&offset=${offset}`);
+    rows.push(...page);
+    if (page.length < limit) break;
+    offset += limit;
+  }
+  state.rows = rows;
+}
+
+function getActiveClone() {
+  return state.clones.find(c => c.slug === state.activeClone) || null;
+}
+
+async function switchClone(slug) {
+  if (slug === state.activeClone) return;
+  state.activeClone = slug;
+  state.filters = {};
+  state.globalSearch = '';
+  const gs = document.getElementById('globalSearch');
+  if (gs) gs.value = '';
+  sessionStorage.setItem(SS_KEY, slug || '');
+  state.rows = [];
+  render();                  // immediate UI feedback
+  try {
+    await loadUsers();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Error cargando datos del clon', 'error');
+  }
+  render();
+}
+
+//===============================================================
+// Add clone
+//===============================================================
+function slugify(s) {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/ñ/g, 'n')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+}
+
+function openAddCloneModal() {
+  const html = `
+    <div class="backdrop" onclick="if(event.target===this)closeModal()">
+      <div class="modal" style="max-width:480px">
+        <h2>Añadir clon</h2>
+        <div class="body">
+          <label style="display:block;margin-bottom:6px;font-weight:500;">Nombre del clon</label>
+          <input type="text" id="newCloneName" placeholder="Ej. Mi Nuevo Clon" autofocus
+                 oninput="document.getElementById('newCloneSlug').textContent = slugify(this.value) || '—'"
+                 onkeydown="if(event.key==='Enter') confirmAddClone()">
+          <p style="margin-top:12px;font-size:12px;color:var(--muted);">
+            Slug interno: <code id="newCloneSlug" style="background:var(--gray-bg);padding:2px 6px;border-radius:4px;">—</code>
+          </p>
+          <p style="font-size:12px;color:var(--muted);margin-top:12px;line-height:1.5;">
+            Se creará una pestaña nueva vacía. Podrás subir el Excel del clon
+            inmediatamente después y los datos quedarán aislados de los otros clones.
+          </p>
+        </div>
+        <div class="footer">
+          <button onclick="closeModal()">Cancelar</button>
+          <button class="primary" onclick="confirmAddClone()">Crear clon</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modalRoot').innerHTML = html;
+  setTimeout(() => document.getElementById('newCloneName')?.focus(), 50);
+}
+
+async function confirmAddClone() {
+  const name = (document.getElementById('newCloneName')?.value || '').trim();
+  if (!name) { toast('Pon un nombre para el clon', 'error'); return; }
+  const slug = slugify(name);
+  if (!slug) { toast('Ese nombre no genera un slug válido', 'error'); return; }
+  if (state.clones.some(c => c.slug === slug)) {
+    toast(`Ya existe un clon con slug "${slug}". Prueba otro nombre.`, 'error');
+    return;
+  }
+  try {
+    const maxPos = state.clones.reduce((m, c) => Math.max(m, c.position || 0), 0);
+    await sb(CLONES_TABLE, {
+      method: 'POST',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ slug, name, position: maxPos + 1 }),
+    });
+    closeModal();
+    toast(`Clon "${name}" creado.`, 'success');
+    await loadClones();
+    await switchClone(slug);
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Error creando clon', 'error');
+  }
+}
+
+//===============================================================
 // Excel parsing
 //===============================================================
 function cellText(ws, addr) {
@@ -525,10 +708,8 @@ function cellBool(ws, addr) {
   return t === '1' || t.toLowerCase() === 'true' || t.toLowerCase() === 'sí' || t.toLowerCase() === 'si';
 }
 function cellDateISO(ws, addr) {
-  // returns YYYY-MM-DD or null
   const c = ws[addr];
   if (!c) return null;
-  // SheetJS sometimes provides .w as the formatted text
   if (c.w) {
     const m = String(c.w).match(/(\d{4})-(\d{2})-(\d{2})/);
     if (m) return `${m[1]}-${m[2]}-${m[3]}`;
@@ -536,7 +717,6 @@ function cellDateISO(ws, addr) {
     if (m2) return `${m2[3]}-${m2[2]}-${m2[1]}`;
   }
   if (typeof c.v === 'number') {
-    // Excel serial date
     const d = XLSX.SSF.parse_date_code(c.v);
     if (d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
   }
@@ -554,13 +734,11 @@ function parseExcel(buf) {
   if (!ref) throw new Error('La hoja está vacía');
   const range = XLSX.utils.decode_range(ref);
 
-  // Sanity check: column E of first data row should look like a country code (pure digits, 1-4 chars)
-  const firstDataRowIdx = range.s.r + 2;            // +1 to skip header, +1 because rows are 1-indexed in excel addr
+  const firstDataRowIdx = range.s.r + 2;
   const probe_E = cellText(ws, 'E' + firstDataRowIdx);
   const probe_F = cellText(ws, 'F' + firstDataRowIdx);
   const eOk = /^\d{1,4}$/.test(probe_E);
   const fOk = /^\d{6,15}$/.test(probe_F);
-  // Try a couple more rows in case the first user is incomplete (QuadramAdmin)
   if (!eOk || !fOk) {
     let found = false;
     for (let r = firstDataRowIdx; r <= Math.min(firstDataRowIdx + 5, range.e.r + 1); r++) {
@@ -577,12 +755,12 @@ function parseExcel(buf) {
   for (let r = range.s.r + 1; r <= range.e.r; r++) {
     const rowAddr = (col) => col + (r + 1);
     const phone = cellText(ws, rowAddr(XLSX_MAP.phone));
-    if (!phone) continue;       // skip rows without a phone (admin/test rows)
+    if (!phone) continue;
     const ageRaw = cellNum(ws, rowAddr(XLSX_MAP.age));
     const ratingRaw = cellNum(ws, rowAddr(XLSX_MAP.app_rating));
     const acompanaRaw = cellNum(ws, rowAddr(XLSX_MAP.used_acompana));
     const nightRaw = cellNum(ws, rowAddr(XLSX_MAP.used_night_security));
-    const row = {
+    rows.push({
       user_id:              cellText(ws, rowAddr(XLSX_MAP.user_id)) || null,
       country_code:         cellText(ws, rowAddr(XLSX_MAP.country_code)) || null,
       phone:                phone,
@@ -601,8 +779,7 @@ function parseExcel(buf) {
       used_night_security:  (nightRaw || 0) > 0,
       app_installed:        cellBool(ws, rowAddr(XLSX_MAP.app_installed)),
       has_widget:           cellBool(ws, rowAddr(XLSX_MAP.has_widget)),
-    };
-    rows.push(row);
+    });
   }
   return rows;
 }
@@ -613,7 +790,11 @@ function parseExcel(buf) {
 document.getElementById('fileInput').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  e.target.value = '';                              // allow re-select same file
+  e.target.value = '';
+  if (!state.activeClone) {
+    toast('Selecciona o crea un clon antes de subir un Excel', 'error');
+    return;
+  }
   try {
     const buf = await file.arrayBuffer();
     const rows = parseExcel(buf);
@@ -621,7 +802,7 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
       toast('No se han encontrado filas con teléfono en el Excel.', 'error');
       return;
     }
-    state.preview = { rows, filename: file.name };
+    state.preview = { rows, filename: file.name, targetClone: state.activeClone };
     renderPreviewModal();
   } catch (err) {
     console.error(err);
@@ -630,17 +811,19 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
 });
 
 async function confirmUpload() {
-  const rows = state.preview.rows;
+  const { rows, targetClone } = state.preview;
   state.preview = null;
   closeModal();
-  const total = rows.length;
+  // Tag every row with the clone slug it belongs to
+  const tagged = rows.map(r => ({ ...r, clone_slug: targetClone }));
+  const total = tagged.length;
   let done = 0;
   showProgressToast(`Subiendo 0 / ${total}…`);
   try {
     const batchSize = 100;
-    for (let i = 0; i < rows.length; i += batchSize) {
-      const batch = rows.slice(i, i + batchSize);
-      await sb(TABLE + '?on_conflict=phone', {
+    for (let i = 0; i < tagged.length; i += batchSize) {
+      const batch = tagged.slice(i, i + batchSize);
+      await sb(USERS_TABLE + '?on_conflict=clone_slug,phone', {
         method: 'POST',
         headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
         body: JSON.stringify(batch),
@@ -649,9 +832,12 @@ async function confirmUpload() {
       updateProgressToast(`Subiendo ${done} / ${total}…`);
     }
     hideProgressToast();
-    toast(`Cargados ${total} usuarios en Supabase.`, 'success');
-    await loadAll();
-    render();
+    const cloneName = state.clones.find(c => c.slug === targetClone)?.name || targetClone;
+    toast(`Cargados ${total} usuarios en "${cloneName}".`, 'success');
+    if (state.activeClone === targetClone) {
+      await loadUsers();
+      render();
+    }
   } catch (err) {
     hideProgressToast();
     console.error(err);
@@ -660,27 +846,9 @@ async function confirmUpload() {
 }
 
 //===============================================================
-// Load from Supabase
-//===============================================================
-async function loadAll() {
-  // pull all rows; PostgREST returns max 1000 by default — paginate just in case
-  const rows = [];
-  let offset = 0;
-  const limit = 1000;
-  while (true) {
-    const page = await sb(`${TABLE}?select=*&order=registered_at.desc.nullslast&limit=${limit}&offset=${offset}`);
-    rows.push(...page);
-    if (page.length < limit) break;
-    offset += limit;
-  }
-  state.rows = rows;
-}
-
-//===============================================================
 // Filtering
 //===============================================================
 function passesFilters(row) {
-  // Global search
   if (state.globalSearch) {
     const q = state.globalSearch.toLowerCase();
     const hay = [row.first_name, row.last_name, row.email, row.phone, row.brand, row.model]
@@ -693,7 +861,6 @@ function passesFilters(row) {
     if (!col) continue;
     const v = row[key];
     if (col.type === 'multi') {
-      // f is an array of allowed values; null/empty represented by ''
       const repr = v == null || v === '' ? '' : String(v);
       if (!f.includes(repr)) return false;
     } else if (col.type === 'text') {
@@ -709,7 +876,6 @@ function passesFilters(row) {
       if (f.from && (!d || d < f.from)) return false;
       if (f.to && (!d || d > f.to)) return false;
     } else if (col.type === 'bool') {
-      // f is 'yes' | 'no'
       const truthy = !!v;
       if (f === 'yes' && !truthy) return false;
       if (f === 'no' && truthy) return false;
@@ -737,10 +903,36 @@ function getFilteredSorted() {
 // Render
 //===============================================================
 function render() {
+  renderTabs();
+  renderCloneHeader();
   renderStats();
   renderChips();
   renderTable();
   renderRowCount();
+  updateUploadBtnState();
+}
+
+function renderTabs() {
+  const html = state.clones.map(c => `
+    <button class="tab ${c.slug === state.activeClone ? 'active' : ''}"
+            onclick="switchClone('${escapeAttr(c.slug)}')">
+      ${escapeHtml(c.name)}
+    </button>
+  `).join('') + `<button class="tab add-tab" onclick="openAddCloneModal()">+ Añadir clon</button>`;
+  document.getElementById('tabsRow').innerHTML = html;
+}
+
+function renderCloneHeader() {
+  const c = getActiveClone();
+  const el = document.getElementById('cloneHeader');
+  if (!c) {
+    el.innerHTML = `<div class="clone-name" style="color:var(--muted);">Crea el primer clon para empezar →</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="clone-name">${escapeHtml(c.name)}</div>
+    <div class="clone-slug">${escapeHtml(c.slug)}</div>
+  `;
 }
 
 function renderStats() {
@@ -751,17 +943,15 @@ function renderStats() {
   const installed = all.filter(r => r.app_installed).length;
   const widget = all.filter(r => r.has_widget).length;
   const grupo = all.filter(r => r.has_security_group).length;
-  const alertas = all.filter(r => r.has_alerts).length;
   const pct = (n) => t ? Math.round(n * 100 / t) + '%' : '—';
-  const html = `
-    <div class="stat red"><div class="label">Usuarios</div><div class="value">${t}</div><div class="sub">en base de datos</div></div>
+  document.getElementById('stats').innerHTML = `
+    <div class="stat red"><div class="label">Usuarios</div><div class="value">${t}</div><div class="sub">en este clon</div></div>
     <div class="stat"><div class="label">iOS</div><div class="value">${ios}</div><div class="sub">${pct(ios)}</div></div>
     <div class="stat"><div class="label">Android</div><div class="value">${android}</div><div class="sub">${pct(android)}</div></div>
     <div class="stat"><div class="label">App instalada</div><div class="value">${installed}</div><div class="sub">${pct(installed)}</div></div>
     <div class="stat"><div class="label">Widget</div><div class="value">${widget}</div><div class="sub">${pct(widget)}</div></div>
     <div class="stat"><div class="label">Grupo de seguridad</div><div class="value">${grupo}</div><div class="sub">${pct(grupo)}</div></div>
   `;
-  document.getElementById('stats').innerHTML = html;
 }
 
 function renderChips() {
@@ -774,25 +964,33 @@ function renderChips() {
     if (f == null) continue;
     const col = COLS.find(c => c.key === key);
     if (!col) continue;
-    let label = col.label;
     let val = '';
     if (col.type === 'multi') val = (f.length === 0) ? 'ninguno' : (f.length <= 3 ? f.map(x => x || '∅').join(', ') : `${f.length} valores`);
     else if (col.type === 'text') val = `"${f}"`;
     else if (col.type === 'numrange') val = `${f.min ?? '−∞'} ≤ x ≤ ${f.max ?? '∞'}`;
     else if (col.type === 'daterange') val = `${f.from || ''} → ${f.to || ''}`;
     else if (col.type === 'bool') val = f === 'yes' ? 'Sí' : 'No';
-    chips.push(`<span class="chip">${label}: ${escapeHtml(val)} <button onclick="clearFilter('${key}')">×</button></span>`);
+    chips.push(`<span class="chip">${col.label}: ${escapeHtml(val)} <button onclick="clearFilter('${key}')">×</button></span>`);
   }
   wrap.innerHTML = chips.join('');
 }
 
 function renderTable() {
   const wrap = document.getElementById('tableWrap');
-  if (!state.rows.length) {
+  if (!state.activeClone) {
     wrap.innerHTML = `
       <div class="empty-state">
-        <h3>Sin datos cargados</h3>
-        <p>Sube el Excel de usuarios para empezar.</p>
+        <h3>Sin clon seleccionado</h3>
+        <p>Pulsa "+ Añadir clon" para crear el primero.</p>
+      </div>`;
+    return;
+  }
+  if (!state.rows.length) {
+    const c = getActiveClone();
+    wrap.innerHTML = `
+      <div class="empty-state">
+        <h3>"${escapeHtml(c?.name || '')}" no tiene datos todavía</h3>
+        <p>Pulsa <strong>Subir Excel</strong> arriba a la derecha para cargar usuarios en este clon.</p>
       </div>`;
     return;
   }
@@ -838,9 +1036,25 @@ function renderCell(row, col) {
 }
 
 function renderRowCount() {
+  const el = document.getElementById('rowCount');
+  if (!state.activeClone) { el.textContent = ''; return; }
   const total = state.rows.length;
   const filtered = getFilteredSorted().length;
-  document.getElementById('rowCount').textContent = filtered === total ? `${total} usuarios` : `${filtered} de ${total} usuarios`;
+  el.textContent = filtered === total ? `${total} usuarios` : `${filtered} de ${total} usuarios`;
+}
+
+function updateUploadBtnState() {
+  const btn = document.getElementById('uploadBtn');
+  const c = getActiveClone();
+  if (c) {
+    btn.disabled = false;
+    btn.title = `Subir Excel a "${c.name}"`;
+    btn.textContent = 'Subir Excel';
+  } else {
+    btn.disabled = true;
+    btn.title = 'Crea o selecciona un clon primero';
+    btn.textContent = 'Subir Excel';
+  }
 }
 
 //===============================================================
@@ -999,22 +1213,24 @@ function exportCsv() {
     });
     lines.push(cells.join(';'));
   }
-  const csv = '﻿' + lines.join('\n');     // BOM for Excel UTF-8
+  const csv = '﻿' + lines.join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   const today = new Date().toISOString().slice(0, 10);
+  const cloneSlug = state.activeClone || 'sin-clon';
   a.href = url;
-  a.download = `te-acompana-usuarios-${today}.csv`;
+  a.download = `${cloneSlug}-usuarios-${today}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
 
 //===============================================================
-// Modal (preview)
+// Modal (preview upload)
 //===============================================================
 function renderPreviewModal() {
-  const { rows, filename } = state.preview;
+  const { rows, filename, targetClone } = state.preview;
+  const cloneName = state.clones.find(c => c.slug === targetClone)?.name || targetClone;
   const sample = rows.slice(0, 10);
   const cols = ['phone', 'first_name', 'last_name', 'email', 'os', 'brand', 'registered_at'];
   const html = `
@@ -1022,7 +1238,10 @@ function renderPreviewModal() {
       <div class="modal">
         <h2>Confirmar subida · ${escapeHtml(filename)}</h2>
         <div class="body">
-          <p>Se han detectado <strong>${rows.length}</strong> usuarios en el Excel. Se hará upsert por teléfono: los existentes se actualizan y los nuevos se insertan.</p>
+          <div class="target-clone">
+            Los datos se cargarán en el clon <strong>${escapeHtml(cloneName)}</strong>. Los demás clones no se ven afectados.
+          </div>
+          <p>Se han detectado <strong>${rows.length}</strong> usuarios en el Excel. Se hará upsert por (clon + teléfono): los existentes se actualizan y los nuevos se insertan.</p>
           <div class="preview-table">
             <table>
               <thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>
@@ -1035,7 +1254,7 @@ function renderPreviewModal() {
         </div>
         <div class="footer">
           <button onclick="cancelUpload()">Cancelar</button>
-          <button class="primary" onclick="confirmUpload()">Subir a Supabase</button>
+          <button class="primary" onclick="confirmUpload()">Subir a "${escapeHtml(cloneName)}"</button>
         </div>
       </div>
     </div>
@@ -1090,7 +1309,12 @@ function escapeAttr(s) { return escapeHtml(s); }
 //===============================================================
 (async () => {
   try {
-    await loadAll();
+    await loadClones();
+    const remembered = sessionStorage.getItem(SS_KEY);
+    state.activeClone = (remembered && state.clones.find(c => c.slug === remembered)?.slug)
+      || state.clones[0]?.slug
+      || null;
+    if (state.activeClone) await loadUsers();
   } catch (err) {
     console.error(err);
     toast('No se pudo cargar la base de datos: ' + err.message, 'error');

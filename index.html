@@ -798,6 +798,19 @@ function detectColumnMap(ws, range) {
   return { headers, map };
 }
 
+// ¿La columna `letter` contiene mayoritariamente valores con pinta de teléfono?
+// Probamos las 30 primeras filas no vacías. >50% deben ser dígitos 6-15 chars.
+function columnLooksLikePhones(ws, letter, range) {
+  let matches = 0, samples = 0;
+  for (let r = range.s.r + 1; r <= Math.min(range.s.r + 30, range.e.r); r++) {
+    const v = cellText(ws, letter + (r + 1));
+    if (!v) continue;
+    samples++;
+    if (/^\d{6,15}$/.test(v)) matches++;
+  }
+  return samples >= 3 && matches / samples > 0.5;
+}
+
 function parseExcel(buf) {
   const wb = XLSX.read(buf, { type: 'array', cellDates: false });
   const ws = wb.Sheets[wb.SheetNames[0]];
@@ -808,8 +821,18 @@ function parseExcel(buf) {
   // Estrategia 1: detectar columnas por sinónimos de cabecera (Safy, futuros formatos).
   let { headers, map } = detectColumnMap(ws, range);
 
-  // Estrategia 2 (fallback Te acompaña): si no hay 'phone' detectado, probamos
-  // si la columna F del segundo registro parece un teléfono y, en ese caso,
+  // SANITY CHECK: la columna detectada como `phone` tiene que contener
+  // valores con pinta de teléfono. Algunos exports (Te acompaña/Quadram)
+  // tienen cabeceras desplazadas y pueden engañar al matcher de sinónimos
+  // (p.ej. "phone" aparece en col D pero los datos de col D son user_ids
+  // pequeños tipo 1, 3, 4…). Si no pasa el check, descartamos toda la
+  // detección y caemos al fallback Te acompaña.
+  if (map.phone && !columnLooksLikePhones(ws, map.phone, range)) {
+    map = {};
+  }
+
+  // Estrategia 2 (fallback Te acompaña): si no hay 'phone' válido, probamos
+  // si las columnas F (teléfono) y E (cód. país) cuadran y, en ese caso,
   // asumimos el mapping hardcodeado del export de Quadram.
   if (!map.phone) {
     let teAcompanaLikely = false;
@@ -825,7 +848,7 @@ function parseExcel(buf) {
 
   if (!map.phone) {
     const sample = Object.entries(headers).slice(0, 8).map(([l,h]) => `${l}=${h}`).join(', ');
-    throw new Error(`No se ha encontrado columna de teléfono en el Excel. Cabeceras detectadas: ${sample || '(vacías)'}…`);
+    throw new Error(`No se ha encontrado columna de teléfono válida en el Excel. Cabeceras detectadas: ${sample || '(vacías)'}…`);
   }
 
   // Iterar filas. La cabecera es range.s.r (fila 1 del rango).

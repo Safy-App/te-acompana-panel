@@ -851,25 +851,36 @@ function parseExcel(buf) {
     throw new Error(`No se ha encontrado columna de teléfono válida en el Excel. Cabeceras detectadas: ${sample || '(vacías)'}…`);
   }
 
+  if (!map.user_id) {
+    const sample = Object.entries(headers).slice(0, 8).map(([l,h]) => `${l}=${h}`).join(', ');
+    throw new Error(`No se ha encontrado columna de user_id en el Excel. La clave de upsert es (clon, user_id). Cabeceras detectadas: ${sample || '(vacías)'}…`);
+  }
+
   // Iterar filas. La cabecera es range.s.r (fila 1 del rango).
-  // Deduplicamos por teléfono mientras leemos: si un teléfono aparece dos
-  // veces en el Excel, nos quedamos con la última ocurrencia. Esto es
-  // imprescindible porque PostgREST no permite que un mismo `ON CONFLICT`
-  // afecte a la misma fila destino dos veces dentro del mismo batch.
-  const byPhone = new Map();
-  let totalWithPhone = 0;
+  // Deduplicamos por user_id (la clave de upsert): si un user_id aparece
+  // dos veces en el Excel, nos quedamos con la última ocurrencia. Esto
+  // es imprescindible porque PostgREST no permite que un mismo
+  // `ON CONFLICT` afecte a la misma fila destino dos veces en un batch.
+  // Filtramos también filas sin teléfono (cuentas admin/test internas)
+  // para mantener el conteo del panel a "usuarios reales registrados".
+  const byUserId = new Map();
+  let skippedNoPhone = 0;
+  let skippedNoUserId = 0;
+  let totalEligible = 0;
   for (let r = range.s.r + 1; r <= range.e.r; r++) {
     const at = (col) => col ? col + (r + 1) : null;
     const phone = cellText(ws, at(map.phone));
-    if (!phone) continue;
-    totalWithPhone++;
+    if (!phone) { skippedNoPhone++; continue; }
+    const userId = cellText(ws, at(map.user_id));
+    if (!userId) { skippedNoUserId++; continue; }
+    totalEligible++;
 
     // Para los contadores (Acompaña, Seg. Nocturna), >0 → true.
     const acompanaRaw = map.used_acompana ? cellNum(ws, at(map.used_acompana)) : null;
     const nightRaw    = map.used_night_security ? cellNum(ws, at(map.used_night_security)) : null;
 
-    byPhone.set(phone, {
-      user_id:              map.user_id        ? (cellText(ws, at(map.user_id)) || null) : null,
+    byUserId.set(userId, {
+      user_id:              userId,
       country_code:         map.country_code   ? (cellText(ws, at(map.country_code)) || null) : null,
       phone:                phone,
       brand:                map.brand          ? (cellText(ws, at(map.brand)) || null) : null,
@@ -889,10 +900,12 @@ function parseExcel(buf) {
       has_widget:           map.has_widget     ? cellBool(ws, at(map.has_widget)) : false,
     });
   }
-  const rows = Array.from(byPhone.values());
-  // Adjunta metadatos al array para mostrarlos en el preview y para debugging.
+  const rows = Array.from(byUserId.values());
+  // Adjunta metadatos al array para mostrarlos en el preview.
   rows.detectedMap = map;
-  rows.duplicatesRemoved = totalWithPhone - rows.length;
+  rows.duplicatesRemoved = totalEligible - rows.length;
+  rows.skippedNoPhone = skippedNoPhone;
+  rows.skippedNoUserId = skippedNoUserId;
   return rows;
 }
 
@@ -935,7 +948,7 @@ async function confirmUpload() {
     const batchSize = 500;
     for (let i = 0; i < tagged.length; i += batchSize) {
       const batch = tagged.slice(i, i + batchSize);
-      await sb(USERS_TABLE + '?on_conflict=clone_slug,phone', {
+      await sb(USERS_TABLE + '?on_conflict=clone_slug,user_id', {
         method: 'POST',
         headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
         body: JSON.stringify(batch),
@@ -1378,7 +1391,11 @@ function renderPreviewModal() {
           <div class="target-clone">
             Los datos se cargarán en el clon <strong>${escapeHtml(cloneName)}</strong>. Los demás clones no se ven afectados.
           </div>
-          <p>Se han detectado <strong>${rows.length}</strong> usuarios únicos en el Excel${rows.duplicatesRemoved ? ` (deduplicados ${rows.duplicatesRemoved} teléfonos repetidos: se ha quedado la última ocurrencia)` : ''}. Upsert por (clon + teléfono): los existentes se actualizan, los nuevos se insertan.</p>
+          <p>Se han detectado <strong>${rows.length}</strong> usuarios únicos en el Excel${rows.duplicatesRemoved ? ` (deduplicados ${rows.duplicatesRemoved} user_id repetidos: se queda la última ocurrencia)` : ''}. Upsert por (clon + user_id): los existentes se actualizan, los nuevos se insertan.</p>
+          ${(rows.skippedNoPhone || rows.skippedNoUserId) ? `
+          <p style="font-size:12px;color:var(--muted);margin-top:-4px;">
+            Filas descartadas: ${rows.skippedNoPhone} sin teléfono${rows.skippedNoUserId ? `, ${rows.skippedNoUserId} sin user_id` : ''} (cuentas internas/admin sin datos de usuario real).
+          </p>` : ''}
           <details style="margin-top:8px;margin-bottom:12px;">
             <summary style="cursor:pointer;font-size:12px;color:var(--muted);">Mapeo de columnas detectado (${Object.keys(map).length} de ${mapEntries.length} campos)</summary>
             <div class="map-pills">${mapHtml}</div>

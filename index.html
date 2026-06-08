@@ -131,7 +131,7 @@
   /* Stats */
   .stats {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 12px;
     padding: 16px 24px 0;
   }
@@ -533,7 +533,6 @@ const TA_FALLBACK_MAP = {
   has_security_group:   'Z',
   used_acompana:        'AB',
   used_night_security:  'AC',
-  app_installed:        'AE',
   has_widget:           'AF',
 };
 
@@ -558,7 +557,6 @@ const FIELD_SYNONYMS = {
   has_security_group:   ['telefonosconfianza', 'hastrustedphones', 'gruposeguridad', 'gruposeguro'],
   used_acompana:        ['alertascentinela', 'centinelacount', 'centinela', 'usoacompana', 'acompana'],
   used_night_security:  ['alarmasnocturnas', 'nightalarmcount', 'segnocturna', 'seguridadnocturna'],
-  app_installed:        ['appinstalada', 'appinstalled'],
   has_widget:           ['widgetactivo', 'activewidget', 'widget'],
 };
 
@@ -577,7 +575,6 @@ const COLS = [
   { key: 'has_security_group',  label: 'Grupo Seg.',     type: 'bool',     align: 'center' },
   { key: 'used_acompana',       label: 'Acompaña',       type: 'bool',     align: 'center' },
   { key: 'used_night_security', label: 'Seg. Nocturna',  type: 'bool',     align: 'center' },
-  { key: 'app_installed',       label: 'Instalada',      type: 'bool',     align: 'center' },
   { key: 'has_widget',          label: 'Widget',         type: 'bool',     align: 'center' },
 ];
 
@@ -896,7 +893,6 @@ function parseExcel(buf) {
       has_security_group:   map.has_security_group  ? cellBool(ws, at(map.has_security_group)) : false,
       used_acompana:        (acompanaRaw || 0) > 0,
       used_night_security:  (nightRaw    || 0) > 0,
-      app_installed:        map.app_installed  ? cellBool(ws, at(map.app_installed)) : false,
       has_widget:           map.has_widget     ? cellBool(ws, at(map.has_widget)) : false,
     });
   }
@@ -1065,7 +1061,6 @@ function renderStats() {
   const t = all.length;
   const ios = all.filter(r => r.os === 'iOS').length;
   const android = all.filter(r => r.os === 'Android').length;
-  const installed = all.filter(r => r.app_installed).length;
   const widget = all.filter(r => r.has_widget).length;
   const grupo = all.filter(r => r.has_security_group).length;
   const pct = (n) => t ? Math.round(n * 100 / t) + '%' : '—';
@@ -1073,7 +1068,6 @@ function renderStats() {
     <div class="stat red"><div class="label">Usuarios</div><div class="value">${t}</div><div class="sub">en este clon</div></div>
     <div class="stat"><div class="label">iOS</div><div class="value">${ios}</div><div class="sub">${pct(ios)}</div></div>
     <div class="stat"><div class="label">Android</div><div class="value">${android}</div><div class="sub">${pct(android)}</div></div>
-    <div class="stat"><div class="label">App instalada</div><div class="value">${installed}</div><div class="sub">${pct(installed)}</div></div>
     <div class="stat"><div class="label">Widget</div><div class="value">${widget}</div><div class="sub">${pct(widget)}</div></div>
     <div class="stat"><div class="label">Grupo de seguridad</div><div class="value">${grupo}</div><div class="sub">${pct(grupo)}</div></div>
   `;
@@ -1374,7 +1368,6 @@ function renderPreviewModal() {
     ['has_security_group', 'Grupo seg.'],
     ['used_acompana',      'Acompaña'],
     ['used_night_security','Seg. noct.'],
-    ['app_installed',      'Instalada'],
     ['has_widget',         'Widget'],
   ];
   const mapHtml = mapEntries.map(([f, l]) => {

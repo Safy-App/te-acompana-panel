@@ -6,6 +6,7 @@
 <title>Safy · Panel de Clones</title>
 <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.min.js"></script>
 <style>
   :root {
     --red: #E40520;
@@ -470,9 +471,81 @@
     header.top .logo { height: 36px; }
     .stat .value { font-size: 18px; }
   }
+
+  /* Login */
+  .login-screen {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 500;
+    padding: 20px;
+  }
+  .login-card {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.08);
+    padding: 32px;
+    width: 100%;
+    max-width: 380px;
+  }
+  .login-card img.logo { height: 52px; display: block; margin: 0 auto 8px; }
+  .login-card .sub {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0 0 24px;
+  }
+  .login-card label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .3px;
+    margin: 14px 0 4px;
+  }
+  .login-card input {
+    width: 100%;
+    padding: 11px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  .login-card input:focus { outline: 2px solid var(--red); outline-offset: -1px; border-color: var(--red); }
+  .login-card button.primary {
+    width: 100%;
+    margin-top: 22px;
+    padding: 12px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .login-card .error {
+    background: var(--red-soft);
+    color: var(--red-dark);
+    border: 1px solid var(--red);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 13px;
+    margin-top: 16px;
+    display: none;
+  }
+  .login-card .error.show { display: block; }
+  /* Hasta que el JS decide si hay sesión, ocultamos la app para que no
+     parpadee el panel sin login */
+  body.booting header.top,
+  body.booting nav.tabs-row,
+  body.booting .clone-header,
+  body.booting .stats,
+  body.booting .toolbar,
+  body.booting .table-wrap { display: none; }
 </style>
 </head>
-<body>
+<body class="booting">
 
 <header class="top">
   <img src="assets/logo.svg" alt="Safy · Panel de Clones" class="logo">
@@ -480,6 +553,7 @@
     <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none">
     <button class="ghost" onclick="exportCsv()">Exportar CSV</button>
     <button class="primary" id="uploadBtn" onclick="document.getElementById('fileInput').click()">Subir Excel</button>
+    <button class="ghost" id="logoutBtn" onclick="doLogout()" title="Cerrar sesión">Cerrar sesión</button>
   </div>
 </header>
 
@@ -512,6 +586,13 @@ const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 const CLONES_TABLE = 'clones';
 const USERS_TABLE = 'clone_users';
 const SS_KEY = 'safy_panel_active_clone';
+
+// Cliente Supabase Auth (login email+password, sesión persistente en localStorage).
+const supa = window.supabase.createClient(SB_URL, SB_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true },
+});
+// Sesión actual (null = sin login). Se rellena en el boot.
+let session = null;
 
 // Excel column letters (real positions, NOT the header text — see CLAUDE.md)
 // Te acompaña fallback (Quadram export con desfase de 2 columnas, sin headers
@@ -589,6 +670,7 @@ const state = {
   sort: { col: 'registered_at', dir: 'desc' },
   globalSearch: '',
   preview: null,
+  isMaster: false,       // true = ve todos los clones y puede subir/añadir
 };
 
 //===============================================================
@@ -596,10 +678,13 @@ const state = {
 //===============================================================
 async function sb(path, opts = {}) {
   const { headers: extra, ...rest } = opts;
+  // Con sesión, usamos el JWT del usuario como Bearer → la RLS aplica por clon.
+  // Sin sesión, cae a la anon key (que ya no tiene acceso a clones/clone_users).
+  const bearer = session?.access_token || SB_KEY;
   const res = await fetch(SB_URL + '/rest/v1/' + path, {
     headers: {
       'apikey': SB_KEY,
-      'Authorization': 'Bearer ' + SB_KEY,
+      'Authorization': 'Bearer ' + bearer,
       'Content-Type': 'application/json',
       'Prefer': 'return=representation',
       ...(extra || {}),
@@ -1034,13 +1119,17 @@ function render() {
 }
 
 function renderTabs() {
-  const html = state.clones.map(c => `
+  const tabs = state.clones.map(c => `
     <button class="tab ${c.slug === state.activeClone ? 'active' : ''}"
             onclick="switchClone('${escapeAttr(c.slug)}')">
       ${escapeHtml(c.name)}
     </button>
-  `).join('') + `<button class="tab add-tab" onclick="openAddCloneModal()">+ Añadir clon</button>`;
-  document.getElementById('tabsRow').innerHTML = html;
+  `).join('');
+  // "+ Añadir clon" solo para master.
+  const addTab = state.isMaster
+    ? `<button class="tab add-tab" onclick="openAddCloneModal()">+ Añadir clon</button>`
+    : '';
+  document.getElementById('tabsRow').innerHTML = tabs + addTab;
 }
 
 function renderCloneHeader() {
@@ -1164,6 +1253,12 @@ function renderRowCount() {
 
 function updateUploadBtnState() {
   const btn = document.getElementById('uploadBtn');
+  // "Subir Excel" solo para master; para no-master se oculta por completo.
+  if (!state.isMaster) {
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = '';
   const c = getActiveClone();
   if (c) {
     btn.disabled = false;
@@ -1456,11 +1551,85 @@ function escapeHtml(s) {
 function escapeAttr(s) { return escapeHtml(s); }
 
 //===============================================================
+// Auth · login / logout
+//===============================================================
+function renderLogin(errorMsg) {
+  document.body.classList.remove('booting');
+  const html = `
+    <div class="login-screen" id="loginScreen">
+      <form class="login-card" onsubmit="doLogin(event)">
+        <img src="assets/logo.svg" alt="Safy · Panel de Clones" class="logo">
+        <p class="sub">Panel de Clones · acceso privado</p>
+        <label for="loginEmail">Email</label>
+        <input type="email" id="loginEmail" autocomplete="username" required autofocus>
+        <label for="loginPass">Contraseña</label>
+        <input type="password" id="loginPass" autocomplete="current-password" required>
+        <div class="error ${errorMsg ? 'show' : ''}" id="loginError">${errorMsg ? escapeHtml(errorMsg) : ''}</div>
+        <button type="submit" class="primary" id="loginBtn">Entrar</button>
+      </form>
+    </div>`;
+  document.getElementById('modalRoot').innerHTML = html;
+}
+
+function closeLogin() {
+  document.getElementById('modalRoot').innerHTML = '';
+}
+
+async function doLogin(event) {
+  event.preventDefault();
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPass').value;
+  const btn = document.getElementById('loginBtn');
+  const errEl = document.getElementById('loginError');
+  btn.disabled = true;
+  btn.textContent = 'Entrando…';
+  errEl.classList.remove('show');
+  try {
+    const { data, error } = await supa.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    session = data.session;
+    closeLogin();
+    document.body.classList.add('booting');
+    await afterLogin();
+  } catch (err) {
+    console.error(err);
+    errEl.textContent = 'Email o contraseña incorrectos.';
+    errEl.classList.add('show');
+    btn.disabled = false;
+    btn.textContent = 'Entrar';
+  }
+}
+
+async function doLogout() {
+  try { await supa.auth.signOut(); } catch (e) { /* ignore */ }
+  session = null;
+  location.reload();
+}
+
+//===============================================================
 // Boot
 //===============================================================
-(async () => {
+async function afterLogin() {
   try {
-    await loadClones();
+    // ¿Es master? Con RLS, clone_access solo devuelve las filas propias.
+    let access = [];
+    try { access = await sb(`clone_access?select=is_master`); } catch (e) { access = []; }
+    state.isMaster = Array.isArray(access) && access.some(a => a.is_master);
+
+    await loadClones();   // RLS filtra a los clones permitidos
+
+    if (!state.clones.length) {
+      // Usuario autenticado pero sin acceso a ningún clon.
+      document.body.classList.remove('booting');
+      render();
+      document.getElementById('tableWrap').innerHTML = `
+        <div class="empty-state">
+          <h3>Tu cuenta no tiene acceso a ningún clon</h3>
+          <p>Contacta con el administrador de Safy para que te dé acceso.</p>
+        </div>`;
+      return;
+    }
+
     const remembered = sessionStorage.getItem(SS_KEY);
     state.activeClone = (remembered && state.clones.find(c => c.slug === remembered)?.slug)
       || state.clones[0]?.slug
@@ -1470,7 +1639,22 @@ function escapeAttr(s) { return escapeHtml(s); }
     console.error(err);
     toast('No se pudo cargar la base de datos: ' + err.message, 'error');
   }
+  document.body.classList.remove('booting');
   render();
+}
+
+(async () => {
+  try {
+    const { data } = await supa.auth.getSession();
+    session = data.session;
+  } catch (e) {
+    session = null;
+  }
+  if (!session) {
+    renderLogin();
+    return;
+  }
+  await afterLogin();
 })();
 </script>
 

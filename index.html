@@ -1076,9 +1076,12 @@ function passesFilters(row) {
       const repr = v == null || v === '' ? '' : String(v);
       if (!f.includes(repr)) return false;
     } else if (col.type === 'text') {
-      const q = String(f).toLowerCase();
-      if (!q) continue;
-      if (!String(v || '').toLowerCase().includes(q)) return false;
+      // f puede ser string (formato antiguo) u objeto {contains, presence}
+      const f2 = (typeof f === 'string') ? { contains: f, presence: 'all' } : f;
+      const val = String(v || '').trim();
+      if (f2.presence === 'filled' && val === '') return false;
+      if (f2.presence === 'empty' && val !== '') return false;
+      if (f2.contains && !val.toLowerCase().includes(String(f2.contains).toLowerCase())) return false;
     } else if (col.type === 'numrange') {
       const num = v == null ? null : Number(v);
       if (f.min != null && (num == null || num < f.min)) return false;
@@ -1180,7 +1183,14 @@ function renderChips() {
     if (!col) continue;
     let val = '';
     if (col.type === 'multi') val = (f.length === 0) ? 'ninguno' : (f.length <= 3 ? f.map(x => x || '∅').join(', ') : `${f.length} valores`);
-    else if (col.type === 'text') val = `"${f}"`;
+    else if (col.type === 'text') {
+      const f2 = (typeof f === 'string') ? { contains: f, presence: 'all' } : f;
+      const parts = [];
+      if (f2.contains) parts.push(`"${f2.contains}"`);
+      if (f2.presence === 'filled') parts.push('con dato');
+      if (f2.presence === 'empty') parts.push('vacío');
+      val = parts.join(' · ');
+    }
     else if (col.type === 'numrange') val = `${f.min ?? '−∞'} ≤ x ≤ ${f.max ?? '∞'}`;
     else if (col.type === 'daterange') val = `${f.from || ''} → ${f.to || ''}`;
     else if (col.type === 'bool') val = f === 'yes' ? 'Sí' : 'No';
@@ -1297,7 +1307,17 @@ function openFilter(key, event) {
   let body = '';
   const cur = state.filters[key];
   if (col.type === 'text') {
-    body = `<input type="text" id="popInput" placeholder="Contiene…" value="${escapeAttr(cur || '')}">`;
+    const f2 = (typeof cur === 'string') ? { contains: cur, presence: 'all' } : (cur || { contains: '', presence: 'all' });
+    const filled = state.rows.filter(r => String(r[key] || '').trim() !== '').length;
+    const empty = state.rows.length - filled;
+    const p = f2.presence || 'all';
+    body = `
+      <input type="text" id="popInput" placeholder="Contiene…" value="${escapeAttr(f2.contains || '')}">
+      <div style="margin-top:8px;border-top:1px solid var(--line);padding-top:8px;">
+        <label><input type="radio" name="presence" value="all"    ${p === 'all' ? 'checked' : ''}> Todos</label>
+        <label><input type="radio" name="presence" value="filled" ${p === 'filled' ? 'checked' : ''}> Con dato (${filled})</label>
+        <label><input type="radio" name="presence" value="empty"  ${p === 'empty' ? 'checked' : ''}> Vacío (${empty})</label>
+      </div>`;
   } else if (col.type === 'multi') {
     const values = uniqueValues(key);
     const sel = cur ? new Set(cur) : new Set(values);
@@ -1353,8 +1373,11 @@ function popMultiAll(all) {
 
 function applyFilter(key, type) {
   if (type === 'text') {
-    const v = document.getElementById('popInput').value.trim();
-    state.filters[key] = v || null;
+    const contains = document.getElementById('popInput').value.trim();
+    const presenceEl = document.querySelector('#popoverRoot input[name=presence]:checked');
+    const presence = presenceEl ? presenceEl.value : 'all';
+    // Sin texto y "Todos" → sin filtro.
+    state.filters[key] = (!contains && presence === 'all') ? null : { contains, presence };
   } else if (type === 'multi') {
     const cbs = document.querySelectorAll('#popoverRoot .opts-list input[type=checkbox]');
     const sel = Array.from(cbs).filter(c => c.checked).map(c => c.value);

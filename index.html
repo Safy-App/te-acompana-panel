@@ -266,6 +266,8 @@
   }
   thead th .filter-btn.active { color: var(--red); }
   thead th .sort-ind { font-size: 10px; opacity: .6; }
+  thead th .sort-ind.inactive { opacity: .25; }
+  thead th .th-inner:hover .sort-ind.inactive { opacity: .6; }
 
   tbody td {
     padding: 8px 12px;
@@ -1205,11 +1207,17 @@ function renderTable() {
   const filtered = getFilteredSorted();
   const head = COLS.map(c => {
     const active = state.filters[c.key] != null ? 'active' : '';
-    const sortInd = state.sort.col === c.key ? (state.sort.dir === 'asc' ? '▲' : '▼') : '';
+    const isSorted = state.sort.col === c.key;
+    // Columna activa: ▲ (asc) / ▼ (desc). Resto: ⇅ tenue para indicar que
+    // también se puede ordenar al hacer clic.
+    const sortInd = isSorted
+      ? (state.sort.dir === 'asc' ? '▲' : '▼')
+      : '<span class="sort-ind inactive">⇅</span>';
+    const indHtml = isSorted ? `<span class="sort-ind">${sortInd}</span>` : sortInd;
     return `
       <th style="text-align:${c.align||'left'}">
-        <span class="th-inner" onclick="onSortClick('${c.key}', event)">
-          ${c.label} <span class="sort-ind">${sortInd}</span>
+        <span class="th-inner" onclick="onSortClick('${c.key}', event)" title="Ordenar por ${c.label}">
+          ${c.label} ${indHtml}
         </span>
         <button class="filter-btn ${active}" title="Filtrar" onclick="openFilter('${c.key}', event)">▾</button>
       </th>`;
@@ -1394,7 +1402,12 @@ function onSortClick(key) {
   if (state.sort.col === key) {
     state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
   } else {
-    state.sort = { col: key, dir: 'asc' };
+    // Primer clic en una columna nueva: fechas y números arrancan de MAYOR a
+    // MENOR (más reciente / más alto primero), que es lo que se suele querer;
+    // el texto arranca de A→Z.
+    const col = COLS.find(c => c.key === key);
+    const firstDir = (col && (col.type === 'daterange' || col.type === 'numrange')) ? 'desc' : 'asc';
+    state.sort = { col: key, dir: firstDir };
   }
   render();
 }

@@ -677,7 +677,14 @@ const state = {
   globalSearch: '',
   preview: null,
   isMaster: false,       // true = ve todos los clones y puede subir/añadir
+  loading: false,        // true mientras se cargan los usuarios de un clon
 };
+
+// Máximo de filas pintadas en la tabla a la vez. Los filtros, conteos y el
+// export CSV siguen operando sobre TODAS las filas; esto solo limita cuántos
+// <tr> se meten en el DOM, para que un clon enorme (p.ej. Safy ~53k) no
+// congele el navegador. Si hay más, se muestra un aviso para acotar con filtros.
+const MAX_RENDER_ROWS = 1000;
 
 //===============================================================
 // Supabase helper
@@ -737,12 +744,15 @@ async function switchClone(slug) {
   if (gs) gs.value = '';
   sessionStorage.setItem(SS_KEY, slug || '');
   state.rows = [];
-  render();                  // immediate UI feedback
+  state.loading = true;
+  render();                  // feedback inmediato: muestra "Cargando…"
   try {
     await loadUsers();
   } catch (err) {
     console.error(err);
     toast(err.message || 'Error cargando datos del clon', 'error');
+  } finally {
+    state.loading = false;
   }
   render();
 }
@@ -1209,6 +1219,15 @@ function renderTable() {
       </div>`;
     return;
   }
+  if (state.loading) {
+    const c = getActiveClone();
+    wrap.innerHTML = `
+      <div class="empty-state">
+        <h3><span class="loading"></span> Cargando usuarios de "${escapeHtml(c?.name || '')}"…</h3>
+        <p>En clones grandes puede tardar unos segundos.</p>
+      </div>`;
+    return;
+  }
   if (!state.rows.length) {
     const c = getActiveClone();
     wrap.innerHTML = `
@@ -1219,6 +1238,8 @@ function renderTable() {
     return;
   }
   const filtered = getFilteredSorted();
+  const capped = filtered.length > MAX_RENDER_ROWS;
+  const visible = capped ? filtered.slice(0, MAX_RENDER_ROWS) : filtered;
   const head = COLS.map(c => {
     const active = state.filters[c.key] != null ? 'active' : '';
     const isSorted = state.sort.col === c.key;
@@ -1236,16 +1257,23 @@ function renderTable() {
         <button class="filter-btn ${active}" title="Filtrar" onclick="openFilter('${c.key}', event)">▾</button>
       </th>`;
   }).join('');
-  const body = filtered.map(r => `
+  const body = visible.map(r => `
     <tr>
       ${COLS.map(c => `<td style="text-align:${c.align||'left'}">${renderCell(r, c)}</td>`).join('')}
     </tr>
   `).join('');
+  const notice = capped ? `
+    <div style="padding:10px 14px;background:#FFFBEB;color:#B45309;border-top:1px solid #F59E0B;font-size:12px;">
+      Mostrando las primeras ${MAX_RENDER_ROWS.toLocaleString('es-ES')} de
+      ${filtered.length.toLocaleString('es-ES')} filas. Usa los filtros o el
+      buscador para acotar; los conteos y el export CSV usan el total.
+    </div>` : '';
   wrap.innerHTML = `
     <table>
       <thead><tr>${head}</tr></thead>
       <tbody>${body}</tbody>
     </table>
+    ${notice}
   `;
 }
 
@@ -1674,9 +1702,19 @@ async function afterLogin() {
     state.activeClone = (remembered && state.clones.find(c => c.slug === remembered)?.slug)
       || state.clones[0]?.slug
       || null;
-    if (state.activeClone) await loadUsers();
+    // Mostrar ya la interfaz con estado "cargando" ANTES de traer los usuarios
+    // (un clon grande puede tardar varios segundos en cargar/pintar).
+    state.loading = true;
+    document.body.classList.remove('booting');
+    render();
+    if (state.activeClone) {
+      try { await loadUsers(); } finally { state.loading = false; }
+    } else {
+      state.loading = false;
+    }
   } catch (err) {
     console.error(err);
+    state.loading = false;
     toast('No se pudo cargar la base de datos: ' + err.message, 'error');
   }
   document.body.classList.remove('booting');

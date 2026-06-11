@@ -1489,7 +1489,12 @@ function exportCsv() {
       let v = r[c.key];
       if (c.type === 'bool') v = v ? 'Sí' : 'No';
       if (v == null) v = '';
-      v = String(v).replace(/"/g, '""');
+      v = String(v);
+      // Anti CSV/formula injection: si el valor empieza por = + - @ (o tab/CR),
+      // Excel/Sheets lo interpretaría como fórmula. Lo neutralizamos con un
+      // apóstrofo inicial para que se trate como texto literal.
+      if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
+      v = v.replace(/"/g, '""');
       if (/[;"\n]/.test(v)) v = `"${v}"`;
       return v;
     });

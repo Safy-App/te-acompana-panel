@@ -1661,6 +1661,9 @@ async function doLogin(event) {
     const { data, error } = await supa.auth.signInWithPassword({ email, password });
     if (error) throw error;
     session = data.session;
+    // Reiniciar el reloj de inactividad con el nuevo login.
+    touchActivity._last = 0;
+    touchActivity();
     closeLogin();
     document.body.classList.add('booting');
     await afterLogin();
@@ -1676,8 +1679,58 @@ async function doLogin(event) {
 async function doLogout() {
   try { await supa.auth.signOut(); } catch (e) { /* ignore */ }
   session = null;
+  try { localStorage.removeItem(LS_LAST_ACTIVITY); } catch (e) { /* ignore */ }
   location.reload();
 }
+
+//===============================================================
+// Auth · cierre de sesión por inactividad
+//===============================================================
+// Tras INACTIVITY_LIMIT_MS sin actividad (clic, tecla, scroll, ratón,
+// toque) se cierra la sesión y se vuelve al login. El timestamp vive en
+// localStorage para que la actividad en cualquier pestaña del panel
+// cuente para todas, y para poder comprobarlo al reabrir el navegador.
+// El override por localStorage existe solo para poder probarlo con un
+// límite corto; sin override aplica el valor de producción (10 min).
+const INACTIVITY_LIMIT_MS =
+  Number(localStorage.getItem('safy_panel_inactivity_override_ms')) || 10 * 60 * 1000;
+const LS_LAST_ACTIVITY = 'safy_panel_last_activity';
+
+function touchActivity() {
+  // Atenuado: como mucho una escritura cada 30 s. Tolerancia: el cierre
+  // puede llegar hasta 30 s antes de los 10 min exactos. Irrelevante aquí.
+  const now = Date.now();
+  if (now - (touchActivity._last || 0) < 30000) return;
+  touchActivity._last = now;
+  try { localStorage.setItem(LS_LAST_ACTIVITY, String(now)); } catch (e) { /* ignore */ }
+}
+
+function lastActivity() {
+  const v = Number(localStorage.getItem(LS_LAST_ACTIVITY));
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+async function inactivityLogout() {
+  try { await supa.auth.signOut(); } catch (e) { /* ignore */ }
+  session = null;
+  try { localStorage.removeItem(LS_LAST_ACTIVITY); } catch (e) { /* ignore */ }
+  // Vaciar datos en memoria y DOM antes de mostrar el login.
+  state.rows = [];
+  state.clones = [];
+  state.activeClone = null;
+  state.isMaster = false;
+  render();
+  renderLogin('Sesión cerrada por inactividad.');
+}
+
+['click', 'keydown', 'scroll', 'mousemove', 'touchstart'].forEach(ev =>
+  document.addEventListener(ev, touchActivity, { passive: true }));
+
+setInterval(() => {
+  if (!session) return;
+  const last = lastActivity();
+  if (last && Date.now() - last > INACTIVITY_LIMIT_MS) inactivityLogout();
+}, 30000);
 
 //===============================================================
 // Boot
@@ -1737,6 +1790,17 @@ async function afterLogin() {
     renderLogin();
     return;
   }
+  // Cierre por inactividad: si la última actividad registrada supera el
+  // límite (p.ej. cerró la pestaña y vuelve días después con la sesión
+  // persistida), no entramos — se pide login de nuevo.
+  const last = lastActivity();
+  if (last && Date.now() - last > INACTIVITY_LIMIT_MS) {
+    await inactivityLogout();
+    return;
+  }
+  // Sesión válida y reciente (o primer uso): inicializar el reloj.
+  touchActivity._last = 0;
+  touchActivity();
   await afterLogin();
 })();
 </script>

@@ -420,6 +420,22 @@
   .map-pill.mapped { background: var(--green-bg); color: var(--green); border-color: var(--green); }
   .map-pill.unmapped { background: #FFFBEB; color: #B45309; border-color: #F59E0B; }
   .map-pill strong { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .sync-box {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 12px 0;
+    background: var(--bg);
+  }
+  .sync-box .warn-box {
+    background: #FFFBEB; color: #B45309; border: 1px solid #F59E0B;
+    border-radius: 6px; padding: 8px 10px; font-size: 13px;
+  }
+  .sync-box .danger-box {
+    background: var(--red-soft); color: var(--red-dark); border: 1px solid var(--red);
+    border-radius: 6px; padding: 8px 10px; font-size: 13px;
+  }
+  .sync-box .muted-note { color: var(--muted); font-size: 13px; }
 
   /* Toast */
   .toast {
@@ -678,6 +694,7 @@ const state = {
   preview: null,
   isMaster: false,       // true = ve todos los clones y puede subir/añadir
   loading: false,        // true mientras se cargan los usuarios de un clon
+  rowsLoadedSlug: null,  // slug del clon cuyo censo está realmente cargado en rows
 };
 
 // Máximo de filas pintadas en la tabla a la vez. Los filtros, conteos y el
@@ -717,18 +734,39 @@ async function loadClones() {
 }
 
 async function loadUsers() {
-  if (!state.activeClone) { state.rows = []; return; }
-  const slug = encodeURIComponent(state.activeClone);
+  if (!state.activeClone) { state.rows = []; state.rowsLoadedSlug = null; return; }
+  const slugRaw = state.activeClone;
+  const slug = encodeURIComponent(slugRaw);
+  state.rowsLoadedSlug = null;           // se marca al terminar con éxito
   const rows = [];
   let offset = 0;
   const limit = 1000;
   while (true) {
-    const page = await sb(`${USERS_TABLE}?select=*&clone_slug=eq.${slug}&order=registered_at.desc.nullslast&limit=${limit}&offset=${offset}`);
+    // Orden TOTAL y estable (desempate por id, PK única) para que la paginación
+    // no salte ni duplique filas entre páginas → state.rows es el censo exacto.
+    const page = await sb(`${USERS_TABLE}?select=*&clone_slug=eq.${slug}&order=registered_at.desc.nullslast,id.asc&limit=${limit}&offset=${offset}`);
     rows.push(...page);
     if (page.length < limit) break;
     offset += limit;
   }
   state.rows = rows;
+  state.rowsLoadedSlug = slugRaw;        // censo cargado y completo para este clon
+}
+
+// Lee SOLO los user_id actuales de un clon, frescos de la BD (para recomputar
+// las bajas en el momento de confirmar, sin depender de la foto del preview).
+async function fetchCloneUserIds(slugRaw) {
+  const slug = encodeURIComponent(slugRaw);
+  const ids = [];
+  let offset = 0;
+  const limit = 1000;
+  while (true) {
+    const page = await sb(`${USERS_TABLE}?select=user_id&clone_slug=eq.${slug}&order=id.asc&limit=${limit}&offset=${offset}`);
+    ids.push(...page.map(r => r.user_id).filter(v => v != null && v !== ''));
+    if (page.length < limit) break;
+    offset += limit;
+  }
+  return ids;
 }
 
 function getActiveClone() {
@@ -833,6 +871,18 @@ function cellText(ws, addr) {
   if (c.w !== undefined) return String(c.w).trim();
   if (c.v !== undefined) return String(c.v).trim();
   return '';
+}
+// Lectura de IDENTIDAD/clave (user_id): SIEMPRE el valor crudo (c.v), NUNCA el
+// formateado (c.w), que para números grandes puede venir en notación científica
+// o con separadores y no casaría con el user_id canónico de la BD (provocaría
+// falsas bajas al sincronizar). Normaliza enteros a su string decimal completo.
+function cellId(ws, addr) {
+  const c = ws[addr];
+  if (!c || c.v === undefined || c.v === null) return '';
+  if (typeof c.v === 'number') {
+    return Number.isInteger(c.v) ? BigInt(c.v).toString() : String(c.v);
+  }
+  return String(c.v).trim();
 }
 function cellNum(ws, addr) {
   const c = ws[addr];
@@ -962,16 +1012,22 @@ function parseExcel(buf) {
   // Filtramos también filas sin teléfono (cuentas admin/test internas)
   // para mantener el conteo del panel a "usuarios reales registrados".
   const byUserId = new Map();
+  const allUserIds = new Set();   // TODOS los user_id presentes en el Excel (con o sin teléfono)
   let skippedNoPhone = 0;
   let skippedNoUserId = 0;
-  let totalEligible = 0;
+  let uploadRows = 0;
   for (let r = range.s.r + 1; r <= range.e.r; r++) {
     const at = (col) => col ? col + (r + 1) : null;
-    const phone = cellText(ws, at(map.phone));
-    if (!phone) { skippedNoPhone++; continue; }
-    const userId = cellText(ws, at(map.user_id));
+    // El user_id (identidad) se lee PRIMERO y en crudo, y determina la
+    // presencia en el Excel con independencia del teléfono. Así, un usuario
+    // que viene en el Excel pero con teléfono vacío NO se contará como baja
+    // al sincronizar (su user_id sigue en allUserIds).
+    const userId = cellId(ws, at(map.user_id));
     if (!userId) { skippedNoUserId++; continue; }
-    totalEligible++;
+    allUserIds.add(userId);
+    const phone = cellText(ws, at(map.phone));
+    if (!phone) { skippedNoPhone++; continue; }   // no se sube, pero SÍ cuenta como presente
+    uploadRows++;
 
     // Para los contadores (Acompaña, Seg. Nocturna), >0 → true.
     const acompanaRaw = map.used_acompana ? cellNum(ws, at(map.used_acompana)) : null;
@@ -1000,9 +1056,10 @@ function parseExcel(buf) {
   const rows = Array.from(byUserId.values());
   // Adjunta metadatos al array para mostrarlos en el preview.
   rows.detectedMap = map;
-  rows.duplicatesRemoved = totalEligible - rows.length;
+  rows.duplicatesRemoved = uploadRows - rows.length;
   rows.skippedNoPhone = skippedNoPhone;
   rows.skippedNoUserId = skippedNoUserId;
+  rows.allUserIds = allUserIds;   // base para calcular bajas en sincronización
   return rows;
 }
 
@@ -1017,14 +1074,21 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
     toast('Selecciona o crea un clon antes de subir un Excel', 'error');
     return;
   }
+  const target = state.activeClone;   // clon fijado ANTES de los await
   try {
     const buf = await file.arrayBuffer();
     const rows = parseExcel(buf);
+    // Si el master cambió de pestaña de clon durante el parseo, abortar: el
+    // preview/sincronización se calcularían contra el censo de otro clon.
+    if (state.activeClone !== target) {
+      toast('Has cambiado de clon durante la carga; vuelve a seleccionar el Excel.', 'error');
+      return;
+    }
     if (!rows.length) {
       toast('No se han encontrado filas con teléfono en el Excel.', 'error');
       return;
     }
-    state.preview = { rows, filename: file.name, targetClone: state.activeClone };
+    state.preview = { rows, filename: file.name, targetClone: target };
     renderPreviewModal();
   } catch (err) {
     console.error(err);
@@ -1032,11 +1096,30 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
   }
 });
 
+// Construye una in-list de PostgREST segura: cada valor entrecomillado, con las
+// comillas internas duplicadas, y todo el token codificado para la URL.
+function pgInList(values) {
+  return values.map(v => encodeURIComponent('"' + String(v).replace(/"/g, '""') + '"')).join(',');
+}
+
 async function confirmUpload() {
+  // Leer estado de la casilla y la confirmación tecleada ANTES de cerrar el modal.
+  const doSync = !!document.getElementById('syncDelete')?.checked;
+  const typed = (document.getElementById('syncConfirmText')?.value || '').trim();
   const { rows, targetClone } = state.preview;
+  const sync = state.preview.sync || {};
+
+  // Gate DURO antes de tocar nada: para borrados altos hay que teclear el slug.
+  if (doSync && sync.hardGate && typed !== targetClone) {
+    toast(`Para confirmar el borrado, escribe el identificador del clon: ${targetClone}`, 'error');
+    return;   // modal sigue abierto para que lo escriba
+  }
+  // Seguridad: si por lo que sea el censo no era válido o había 0 coincidencias,
+  // no se borra (la casilla ya iba deshabilitada, pero defensa en profundidad).
+  const syncOk = doSync && sync.rowsValid && !sync.zeroOverlap;
+
   state.preview = null;
   closeModal();
-  // Tag every row with the clone slug it belongs to
   const tagged = rows.map(r => ({ ...r, clone_slug: targetClone }));
   const total = tagged.length;
   let done = 0;
@@ -1053,9 +1136,46 @@ async function confirmUpload() {
       done += batch.length;
       updateProgressToast(`Subiendo ${done} / ${total}…`);
     }
+
+    // Fase de sincronización (borrado opt-in). RECALCULA contra la BD FRESCA
+    // (no la foto del preview): bajas = user_id que están AHORA en el clon pero
+    // NO en el Excel recién subido. Así es inmune a cambios concurrentes y a
+    // re-ejecuciones (idempotente). Acotado siempre por clone_slug.
+    let deleted = 0;
+    if (syncOk) {
+      updateProgressToast('Recalculando bajas…');
+      const xlsIds = sync.xlsIds instanceof Set ? sync.xlsIds : new Set(sync.xlsIds || []);
+      const freshIds = await fetchCloneUserIds(targetClone);
+      const ids = [...new Set(freshIds.map(String))].filter(id => !xlsIds.has(id));
+      // Salvaguarda final: si el borrado real resulta alto y el usuario no pasó
+      // el gate duro (no se le pidió teclear el slug), abortar el borrado.
+      const freshCount = freshIds.length;
+      const realPct = freshCount ? Math.round(ids.length * 100 / freshCount) : 0;
+      const realBig = ids.length >= 50 || realPct >= 50;
+      if (ids.length && realBig && !sync.hardGate) {
+        hideProgressToast();
+        toast(`Subida hecha. Borrado CANCELADO: las bajas reales (${ids.length}) son muchas más de lo previsto; vuelve a subir y confirma el borrado.`, 'error');
+        if (state.activeClone === targetClone) { await loadUsers(); render(); }
+        return;
+      }
+      const delBatch = 200;
+      for (let i = 0; i < ids.length; i += delBatch) {
+        const chunk = ids.slice(i, i + delBatch);
+        await sb(`${USERS_TABLE}?clone_slug=eq.${encodeURIComponent(targetClone)}&user_id=in.(${pgInList(chunk)})`, {
+          method: 'DELETE',
+          headers: { 'Prefer': 'return=minimal' },
+        });
+        deleted += chunk.length;
+        updateProgressToast(`Eliminando bajas ${deleted} / ${ids.length}…`);
+      }
+    }
+
     hideProgressToast();
     const cloneName = state.clones.find(c => c.slug === targetClone)?.name || targetClone;
-    toast(`Cargados ${total} usuarios en "${cloneName}".`, 'success');
+    const msg = deleted
+      ? `Cargados ${total} usuarios en "${cloneName}" · ${deleted} bajas eliminadas.`
+      : `Cargados ${total} usuarios en "${cloneName}".`;
+    toast(msg, 'success');
     if (state.activeClone === targetClone) {
       await loadUsers();
       render();
@@ -1063,7 +1183,9 @@ async function confirmUpload() {
   } catch (err) {
     hideProgressToast();
     console.error(err);
-    toast(err.message || 'Error subiendo a Supabase', 'error');
+    // Re-subir el mismo Excel con sync es seguro: el recálculo de bajas es
+    // idempotente (se calcula contra la BD fresca en cada intento).
+    toast((err.message || 'Error subiendo a Supabase') + ' · Si activaste sincronización, vuelve a subir el mismo Excel para completarla de forma segura.', 'error');
   }
 }
 
@@ -1519,6 +1641,62 @@ function renderPreviewModal() {
   const { rows, filename, targetClone } = state.preview;
   const cloneName = state.clones.find(c => c.slug === targetClone)?.name || targetClone;
   const sample = rows.slice(0, 10);
+
+  // --- Sincronización (borrado opt-in): qué usuarios del clon NO están en el Excel.
+  // xlsIds = TODOS los user_id presentes en el Excel (incluidas filas sin teléfono),
+  // leídos en crudo en parseExcel → un usuario presente en el Excel nunca es baja.
+  // El conteo del preview es informativo; confirmUpload RECALCULA contra la BD fresca.
+  const xlsIds = (rows.allUserIds instanceof Set)
+    ? rows.allUserIds
+    : new Set(rows.map(r => r.user_id != null ? String(r.user_id) : '').filter(Boolean));
+  // ¿El censo cargado (state.rows) corresponde de verdad a este clon y se cargó OK?
+  const rowsValid = state.rowsLoadedSlug === targetClone;
+  const dbRows = rowsValid ? state.rows.filter(r => r.user_id != null && r.user_id !== '') : [];
+  const dbCount = dbRows.length;
+  const overlap = dbRows.filter(r => xlsIds.has(String(r.user_id))).length;
+  const toDelete = dbRows.filter(r => !xlsIds.has(String(r.user_id)));
+  const delN = toDelete.length;
+  const delPct = dbCount ? Math.round(delN * 100 / dbCount) : 0;
+  const delSample = toDelete.slice(0, 8)
+    .map(r => escapeHtml([r.first_name, r.last_name].filter(Boolean).join(' ') || r.email || r.phone || r.user_id))
+    .join(', ');
+  const bigDelete = delN > 0 && (delPct >= 30 || delN >= 50);
+  // 0 coincidencias con un clon que YA tiene usuarios = casi seguro Excel/columna
+  // equivocada → se bloquea la sincronización por completo.
+  const zeroOverlap = dbCount > 0 && overlap === 0;
+  // Borrado alto → exige teclear el identificador del clon (rompe el "confirmar por inercia").
+  const hardGate = !zeroOverlap && delN > 0 && (delPct >= 50 || delN >= 50);
+  // Guardamos en state.preview lo que confirmUpload necesita para RECALCULAR.
+  state.preview.sync = { xlsIds, targetClone, rowsValid, zeroOverlap, hardGate, previewDelN: delN, dbCount };
+
+  let syncInner;
+  if (!rowsValid) {
+    syncInner = `<div class="warn-box">No se ha podido verificar el censo actual de este clon (la carga falló o está incompleta). Recarga la página antes de usar la sincronización.</div>`;
+  } else if (zeroOverlap) {
+    syncInner = `<div class="danger-box">Este Excel <strong>no comparte ningún usuario</strong> con los ${dbCount} ya cargados en este clon. Casi seguro es el Excel equivocado o la columna de ID está mal detectada, así que la sincronización (borrado) queda <strong>bloqueada</strong> por seguridad. La subida normal (alta/actualización) sí se puede hacer.</div>`;
+  } else if (delN === 0) {
+    syncInner = `<div class="muted-note">No hay bajas: los ${dbCount} usuarios del clon están en el Excel. No se eliminaría nada.</div>`;
+  } else {
+    syncInner = `<div class="${bigDelete ? 'danger-box' : 'warn-box'}">
+        Se eliminará${delN === 1 ? '' : 'n'} <strong>${delN}</strong> ${delN === 1 ? 'usuario' : 'usuarios'} (${delPct}% de ${dbCount}; ${overlap} del Excel coinciden con el panel)
+        que est${delN === 1 ? 'á' : 'án'} en el panel pero <strong>NO</strong> en este Excel.
+        ${bigDelete ? '<br><strong>⚠️ Proporción alta. Revisa que el Excel esté completo.</strong>' : ''}
+        <div style="margin-top:6px;font-size:12px;">Ejemplos: ${delSample}${delN > 8 ? ` … (+${delN - 8} más)` : ''}</div>
+        ${hardGate ? `<div style="margin-top:8px;">Para confirmar el borrado, escribe el identificador del clon <code>${escapeHtml(targetClone)}</code>:<br>
+          <input type="text" id="syncConfirmText" placeholder="${escapeHtml(targetClone)}" autocomplete="off" style="margin-top:4px;width:auto;"></div>` : ''}
+      </div>`;
+  }
+  const syncDisabled = (!rowsValid || zeroOverlap) ? 'disabled' : '';
+  const syncHtml = `
+    <div class="sync-box">
+      <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
+        <input type="checkbox" id="syncDelete" ${syncDisabled}
+               onchange="var d=document.getElementById('syncDetails'); if(d) d.style.display=this.checked?'block':'none';">
+        <span style="font-size:13px;">Sincronizar: <strong>eliminar del panel</strong> los usuarios de
+        este clon que ya no aparecen en el Excel. <span style="color:var(--muted);">(desactivado por defecto)</span></span>
+      </label>
+      <div id="syncDetails" style="display:${(!rowsValid || zeroOverlap) ? 'block' : 'none'};margin-top:10px;">${syncInner}</div>
+    </div>`;
   const cols = ['phone', 'first_name', 'last_name', 'email', 'os', 'brand', 'registered_at'];
   const map = rows.detectedMap || {};
   const mapEntries = [
@@ -1561,6 +1739,7 @@ function renderPreviewModal() {
             <summary style="cursor:pointer;font-size:12px;color:var(--muted);">Mapeo de columnas detectado (${Object.keys(map).length} de ${mapEntries.length} campos)</summary>
             <div class="map-pills">${mapHtml}</div>
           </details>
+          ${syncHtml}
           <div class="preview-table">
             <table>
               <thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>

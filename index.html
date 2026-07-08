@@ -946,6 +946,44 @@ function detectColumnMap(ws, range) {
   return { headers, map };
 }
 
+// Nombres de cabecera (normalizados) del export Te acompaña/Quadram.
+// Los DATOS de cada campo están 2 columnas a la DERECHA de su cabecera.
+const TA_HEADER_NAMES = {
+  user_id:              'id',
+  country_code:         'code',
+  phone:                'phone',
+  brand:                'brand',
+  model:                'model',
+  first_name:           'name',
+  last_name:            'lastname',
+  email:                'email',
+  age:                  'age',
+  registered_at:        'createdatdate',
+  app_rating:           'apprating',
+  os:                   'os',
+  has_alerts:           'hasalerts',
+  has_security_group:   'hastrustedphones',
+  used_acompana:        'centinelacount',
+  used_night_security:  'nightalarmcount',
+  has_widget:           'activewidget',
+};
+
+// Mapeo dinámico del export TA: cabecera conocida + 2 columnas = columna de
+// datos real. Inmune a que Quadram inserte/quite columnas intermedias
+// (mientras mantenga su desfase histórico de 2 cabeceras que faltan al inicio).
+function taDynamicMap(headers) {
+  const byName = {};
+  for (const [letter, name] of Object.entries(headers)) {
+    if (!(name in byName)) byName[name] = letter;   // primera aparición gana
+  }
+  const map = {};
+  for (const [field, hname] of Object.entries(TA_HEADER_NAMES)) {
+    const letter = byName[hname];
+    if (letter) map[field] = XLSX.utils.encode_col(XLSX.utils.decode_col(letter) + 2);
+  }
+  return map;
+}
+
 // ¿La columna `letter` contiene mayoritariamente valores con pinta de teléfono?
 // Probamos las 30 primeras filas no vacías. >50% deben ser dígitos 6-15 chars.
 function columnLooksLikePhones(ws, letter, range) {
@@ -981,7 +1019,7 @@ function parseExcel(buf) {
 
   // Estrategia 2 (fallback Te acompaña): si no hay 'phone' válido, probamos
   // si las columnas F (teléfono) y E (cód. país) cuadran y, en ese caso,
-  // asumimos el mapping hardcodeado del export de Quadram.
+  // asumimos el export de Quadram con su desfase de +2 columnas.
   if (!map.phone) {
     let teAcompanaLikely = false;
     for (let r = range.s.r + 2; r <= Math.min(range.s.r + 10, range.e.r + 1); r++) {
@@ -990,7 +1028,15 @@ function parseExcel(buf) {
       if (/^\d{6,15}$/.test(f) && /^\d{1,4}$/.test(e)) { teAcompanaLikely = true; break; }
     }
     if (teAcompanaLikely) {
-      map = { ...TA_FALLBACK_MAP };
+      // Mapeo DINÁMICO: en el export TA los datos van SIEMPRE 2 columnas a la
+      // derecha de su cabecera (al export le faltan 2 cabeceras iniciales).
+      // En vez de letras fijas, localizamos cada cabecera conocida y sumamos
+      // +2. Así, si Quadram inserta/quita columnas (jul-2026: añadió
+      // protectorsCount y desplazó centinela/nightAlarm/widget), el mapeo se
+      // auto-corrige. Si faltan cabeceras, caemos al mapa fijo histórico.
+      const dyn = taDynamicMap(headers);
+      const dynOk = dyn.phone && dyn.user_id && columnLooksLikePhones(ws, dyn.phone, range);
+      map = dynOk ? dyn : { ...TA_FALLBACK_MAP };
     }
   }
 

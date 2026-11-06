@@ -7,3 +7,7 @@
 node_modules/
 .vscode/
 .idea/
+
+# Contexto local del agente — NO subir al repo (contiene secretos)
+CLAUDE.md
+AGENTS.md

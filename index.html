@@ -640,12 +640,15 @@ const TA_FALLBACK_MAP = {
 };
 
 // Sinónimos de cabeceras (normalizados: solo a-z0-9). Cubre el formato Safy
-// original, Te acompaña/Quadram, y formatos en español/inglés. Primer match
-// gana, así que pongo los más específicos primero. Para añadir un formato
+// original, Te acompaña/Quadram, y formatos en español/inglés. El orden de
+// cada lista es la preferencia: gana el primer sinónimo que aparezca en el
+// Excel, así que pongo los más específicos primero. Para añadir un formato
 // nuevo basta con sumar sinónimos a la lista del campo correspondiente.
+// 'id' y 'code' (al final) son las cabeceras del Excel del panel de la app
+// desde que viene alineado (6-nov-2026, tarjeta 484).
 const FIELD_SYNONYMS = {
-  user_id:              ['idusuario', 'userid', 'iduser'],
-  country_code:         ['codigopais', 'codpais', 'countrycode'],
+  user_id:              ['idusuario', 'userid', 'iduser', 'id'],
+  country_code:         ['codigopais', 'codpais', 'countrycode', 'code'],
   phone:                ['telefono', 'phone', 'tel', 'movil'],
   brand:                ['marca', 'brand'],
   model:                ['modelo', 'model'],
@@ -937,10 +940,13 @@ function detectColumnMap(ws, range) {
     const txt = cellText(ws, cellRef);
     if (txt) headers[letter] = normalizeHeader(txt);
   }
+  // Por orden de sinónimo y, a igualdad, la primera columna (tarjeta 484: así
+  // 'createdatdate' gana a 'createdat' aunque esta vaya antes en el Excel).
   const map = {};
   for (const [field, syns] of Object.entries(FIELD_SYNONYMS)) {
-    for (const [letter, h] of Object.entries(headers)) {
-      if (syns.includes(h)) { map[field] = letter; break; }
+    for (const syn of syns) {
+      const hit = Object.entries(headers).find(([, h]) => h === syn);
+      if (hit) { map[field] = hit[0]; break; }
     }
   }
   return { headers, map };
